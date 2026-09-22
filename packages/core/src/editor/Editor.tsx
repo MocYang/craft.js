@@ -92,6 +92,16 @@ export const Editor = ({ children, ...options }: EditorProps) => {
   }, [context, options.enabled]);
 
   React.useEffect(() => {
+    // Only set up the serialize-and-compare subscription when the consumer
+    // actually provided an onNodesChange callback. The subscription serializes
+    // the entire node tree (JSON.stringify) on every store change just to
+    // detect whether the callback should fire, which is pure overhead for
+    // consumers that never passed onNodesChange (e.g. read-only viewers
+    // receiving frequent runtime prop updates).
+    if (!context || !optionsRef.current.onNodesChange) {
+      return;
+    }
+
     context.subscribe(
       (_) => ({
         json: context.query.serialize(),
