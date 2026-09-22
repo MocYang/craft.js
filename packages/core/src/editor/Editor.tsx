@@ -3,7 +3,7 @@ import * as React from 'react';
 import invariant from 'tiny-invariant';
 
 import { EditorContext } from './EditorContext';
-import { useEditorStore } from './store';
+import { editorInitialState, useEditorStore } from './store';
 
 import { Events } from '../events';
 import { Options } from '../interfaces';
@@ -92,22 +92,26 @@ export const Editor = ({ children, ...options }: EditorProps) => {
   }, [context, options.enabled]);
 
   React.useEffect(() => {
-    // Only set up the serialize-and-compare subscription when the consumer
-    // actually provided an onNodesChange callback. The subscription serializes
-    // the entire node tree (JSON.stringify) on every store change just to
-    // detect whether the callback should fire, which is pure overhead for
-    // consumers that never passed onNodesChange (e.g. read-only viewers
-    // receiving frequent runtime prop updates).
-    if (!context || !optionsRef.current.onNodesChange) {
+    if (!context) {
       return;
     }
 
-    context.subscribe(
-      (_) => ({
-        json: context.query.serialize(),
+    // Read current store options so setOptions can enable notifications later.
+    // The default no-op callback does not need full-tree serialization.
+    return context.subscribe(
+      (state) => ({
+        json:
+          state.options.onNodesChange &&
+          state.options.onNodesChange !==
+            editorInitialState.options.onNodesChange
+            ? context.query.serialize()
+            : null,
       }),
       () => {
-        context.query.getOptions().onNodesChange(context.query);
+        const { onNodesChange } = context.query.getOptions();
+        if (onNodesChange) {
+          onNodesChange(context.query);
+        }
       }
     );
   }, [context]);

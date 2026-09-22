@@ -3,6 +3,7 @@
   "private": true,
   "author": "Prev Wong <prevwong@gmail.com>",
   "scripts": {
+    "pack:logic": "node scripts/prepare-logic-release.cjs && npm pack ./release/logic-craftjs",
     "dev": "./scripts/dev.sh",
     "dev:site": "lerna run start --scope site",
     "dev:all": "run-p dev dev:site",
