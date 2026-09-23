@@ -14,7 +14,14 @@ import {
 } from '@craftjs/utils';
 import invariant from 'tiny-invariant';
 
-import { EditorState, NodeId, NodeSelector } from '../interfaces';
+import { getEditAccess } from './editAccess/permissions';
+
+import {
+  EditAccessOptions,
+  EditorState,
+  NodeId,
+  NodeSelector,
+} from '../interfaces';
 import { getNodesFromSelector } from '../utils/getNodesFromSelector';
 import { serializeNode } from '../utils/serializeNode';
 
@@ -26,6 +33,9 @@ export function NodeHelpers(state: EditorState, id: NodeId) {
   const nodeHelpers = (id) => NodeHelpers(state, id);
 
   return {
+    getEditAccess(options: EditAccessOptions) {
+      return getEditAccess(state, id, options);
+    },
     isCanvas() {
       return !!node.data.isCanvas;
     },

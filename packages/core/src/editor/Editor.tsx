@@ -45,16 +45,20 @@ export const Editor = ({ children, ...options }: EditorProps) => {
         let actionType = actionPerformed.type;
 
         if (
-          [HISTORY_ACTIONS.IGNORE, HISTORY_ACTIONS.THROTTLE].includes(
-            actionType
-          ) &&
+          [
+            HISTORY_ACTIONS.IGNORE,
+            HISTORY_ACTIONS.MERGE,
+            HISTORY_ACTIONS.THROTTLE,
+          ].includes(actionType) &&
           actionPerformed.params
         ) {
           actionPerformed.type = actionPerformed.params[0];
         }
 
         if (
-          ['setState', 'deserialize'].includes(actionPerformed.type) ||
+          ['setState', 'deserialize', 'transact'].includes(
+            actionPerformed.type
+          ) ||
           isModifyingNodeData
         ) {
           normalizer((draft) => {
@@ -90,6 +94,22 @@ export const Editor = ({ children, ...options }: EditorProps) => {
       editorOptions.enabled = options.enabled;
     });
   }, [context, options.enabled]);
+
+  React.useEffect(() => {
+    if (!context) return;
+    const current = context.query.getOptions();
+    const changePolicy =
+      options.editAccess !== undefined &&
+      current.editAccess !== options.editAccess;
+    const changeCallback =
+      options.onEditDenied !== undefined &&
+      current.onEditDenied !== options.onEditDenied;
+    if (!changePolicy && !changeCallback) return;
+    context.actions.setOptions((editorOptions) => {
+      if (changePolicy) editorOptions.editAccess = options.editAccess;
+      if (changeCallback) editorOptions.onEditDenied = options.onEditDenied;
+    });
+  }, [context, options.editAccess, options.onEditDenied]);
 
   React.useEffect(() => {
     if (!context) {

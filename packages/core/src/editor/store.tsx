@@ -5,6 +5,7 @@ import {
 } from '@craftjs/utils';
 
 import { ActionMethods } from './actions';
+import { validateEditorChange } from './editAccess/validate';
 import { QueryMethods } from './query';
 
 import { DefaultEventHandlers } from '../events';
@@ -40,6 +41,7 @@ export const editorInitialState: EditorState = {
 
 export const ActionMethodsWithConfig = {
   methods: ActionMethods,
+  validateChange: validateEditorChange,
   ignoreHistoryForActions: [
     'setDOM',
     'setNodeEvent',
