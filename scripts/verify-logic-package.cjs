@@ -178,11 +178,12 @@ async function verifyPackage(tarball, reactVersion) {
     path.join(consumer, 'package.json'),
     JSON.stringify({ private: true })
   );
-  const npmCli = path.join(
-    path.dirname(process.execPath),
-    'node_modules/npm/bin/npm-cli.js'
-  );
-  assert.ok(fs.existsSync(npmCli), 'The Node installation must include npm');
+  const nodeDirectory = path.dirname(process.execPath);
+  const npmCli = [
+    path.join(nodeDirectory, 'node_modules/npm/bin/npm-cli.js'),
+    path.resolve(nodeDirectory, '../lib/node_modules/npm/bin/npm-cli.js'),
+  ].find((candidate) => fs.existsSync(candidate));
+  assert.ok(npmCli, 'The Node installation must include npm');
   runNode(
     [
       npmCli,
