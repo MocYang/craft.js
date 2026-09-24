@@ -24,8 +24,10 @@ describe('<Frame />', () => {
     actions = {
       history: {
         ignore: jest.fn().mockImplementation(() => ({
-          addNodeTree,
-          deserialize,
+          transact: (context, callback) => {
+            expect(context).toEqual({ source: 'document-load' });
+            callback({ addNodeTree, deserialize });
+          },
         })),
       },
     };

@@ -42,7 +42,9 @@ export const Frame = ({ children, json, data }: FrameProps) => {
     const initialData = data || json;
 
     if (initialData) {
-      actions.history.ignore().deserialize(initialData);
+      actions.history.ignore().transact({ source: 'document-load' }, (tx) => {
+        tx.deserialize(initialData);
+      });
     } else if (children) {
       const rootNode = React.Children.only(children) as React.ReactElement;
 
@@ -53,7 +55,9 @@ export const Frame = ({ children, json, data }: FrameProps) => {
         return node;
       });
 
-      actions.history.ignore().addNodeTree(node);
+      actions.history.ignore().transact({ source: 'document-load' }, (tx) => {
+        tx.addNodeTree(node);
+      });
     }
 
     isLoaded.current = true;

@@ -1,10 +1,5 @@
 // https://github.com/pelotom/use-methods
-import produce, {
-  Patch,
-  produceWithPatches,
-  enableMapSet,
-  enablePatches,
-} from 'immer';
+import { Patch, produceWithPatches, enableMapSet, enablePatches } from 'immer';
 import isEqualWith from 'lodash/isEqualWith';
 import { useMemo, useEffect, useRef, useCallback } from 'react';
 
@@ -83,6 +78,13 @@ export type Options<S = any, R extends MethodRecordBase<S> = any, Q = any> = {
   methods: Methods<S, R, Q>;
   ignoreHistoryForActions: ReadonlyArray<keyof MethodRecordBase>;
   normalizeHistory?: (state: S) => void;
+  /** Reject a completed change before it reaches state or history. Must be synchronous. */
+  validateChange?: (
+    nextState: S,
+    previousState: S,
+    action: Action,
+    patches: Patch[]
+  ) => boolean | void;
 };
 
 export type MethodsOrOptions<
@@ -197,13 +199,18 @@ export function useMethods<
   let methodsFactory: Methods<S, R>;
   let ignoreHistoryForActionsRef = useRef([]);
   let normalizeHistoryRef = useRef<any>(() => {});
+  const validateChangeRef = useRef<Options<S>['validateChange']>(undefined);
 
   if (typeof methodsOrOptions === 'function') {
     methodsFactory = methodsOrOptions;
+    ignoreHistoryForActionsRef.current = [];
+    normalizeHistoryRef.current = undefined;
+    validateChangeRef.current = undefined;
   } else {
     methodsFactory = methodsOrOptions.methods;
     ignoreHistoryForActionsRef.current = methodsOrOptions.ignoreHistoryForActions as any;
     normalizeHistoryRef.current = methodsOrOptions.normalizeHistory;
+    validateChangeRef.current = methodsOrOptions.validateChange;
   }
 
   const patchListenerRef = useRef(patchListener);
@@ -212,96 +219,136 @@ export function useMethods<
   const stateRef = useRef(initialState);
 
   const reducer = useMemo(() => {
-    const { current: normalizeHistory } = normalizeHistoryRef;
-    const { current: ignoreHistoryForActions } = ignoreHistoryForActionsRef;
-    const { current: patchListener } = patchListenerRef;
-
     return (state: S, action: Action) => {
-      const query =
-        queryMethods && createQuery(queryMethods, () => state, history);
+      const { current: normalizeHistory } = normalizeHistoryRef;
+      const { current: ignoreHistoryForActions } = ignoreHistoryForActionsRef;
+      const { current: patchListener } = patchListenerRef;
+      // Replay and clear update history while the draft is being produced.
+      // Preserve their bookkeeping until validation accepts the whole change.
+      const previousTimeline = history.timeline;
+      const previousPointer = history.pointer;
+      const restoreHistory = () => {
+        history.timeline = previousTimeline;
+        history.pointer = previousPointer;
+      };
 
-      let finalState;
-      let [nextState, patches, inversePatches] = (produceWithPatches as any)(
-        state,
-        (draft: S) => {
-          switch (action.type) {
-            case HISTORY_ACTIONS.UNDO: {
-              return history.undo(draft);
-            }
-            case HISTORY_ACTIONS.REDO: {
-              return history.redo(draft);
-            }
-            case HISTORY_ACTIONS.CLEAR: {
-              history.clear();
-              return {
-                ...draft,
-              };
-            }
+      try {
+        const query =
+          queryMethods && createQuery(queryMethods, () => state, history);
 
-            // TODO: Simplify History API
-            case HISTORY_ACTIONS.IGNORE:
-            case HISTORY_ACTIONS.MERGE:
-            case HISTORY_ACTIONS.THROTTLE: {
-              const [type, ...params] = action.payload;
-              methodsFactory(draft, query)[type](...params);
-              break;
-            }
-            default:
-              methodsFactory(draft, query)[action.type](...action.payload);
-          }
-        }
-      );
-
-      finalState = nextState;
-
-      if (patchListener) {
-        patchListener(
-          nextState,
+        let finalState;
+        let [nextState, patches, inversePatches] = (produceWithPatches as any)(
           state,
-          { type: action.type, params: action.payload, patches },
-          query,
-          (cb) => {
-            let normalizedDraft = produceWithPatches(nextState, cb);
-            finalState = normalizedDraft[0];
+          (draft: S) => {
+            switch (action.type) {
+              case HISTORY_ACTIONS.UNDO: {
+                return history.undo(draft);
+              }
+              case HISTORY_ACTIONS.REDO: {
+                return history.redo(draft);
+              }
+              case HISTORY_ACTIONS.CLEAR: {
+                history.clear();
+                return {
+                  ...draft,
+                };
+              }
 
-            patches = [...patches, ...normalizedDraft[1]];
-            inversePatches = [...normalizedDraft[2], ...inversePatches];
+              // TODO: Simplify History API
+              case HISTORY_ACTIONS.IGNORE:
+              case HISTORY_ACTIONS.MERGE:
+              case HISTORY_ACTIONS.THROTTLE: {
+                const [type, ...params] = action.payload;
+                methodsFactory(draft, query)[type](...params);
+                break;
+              }
+              default:
+                methodsFactory(draft, query)[action.type](...action.payload);
+            }
           }
         );
-      }
 
-      if (
-        [HISTORY_ACTIONS.UNDO, HISTORY_ACTIONS.REDO].includes(
-          action.type as any
-        ) &&
-        normalizeHistory
-      ) {
-        finalState = produce(finalState, normalizeHistory);
-      }
+        finalState = nextState;
 
-      if (
-        ![
-          ...ignoreHistoryForActions,
-          HISTORY_ACTIONS.UNDO,
-          HISTORY_ACTIONS.REDO,
-          HISTORY_ACTIONS.IGNORE,
-          HISTORY_ACTIONS.CLEAR,
-        ].includes(action.type as any)
-      ) {
-        if (action.type === HISTORY_ACTIONS.THROTTLE) {
-          history.throttleAdd(
-            patches,
-            inversePatches,
-            action.config && action.config.rate
+        if (patchListener) {
+          patchListener(
+            nextState,
+            state,
+            { type: action.type, params: action.payload, patches },
+            query,
+            (cb) => {
+              let normalizedDraft = produceWithPatches(finalState, cb);
+              finalState = normalizedDraft[0];
+
+              patches = [...patches, ...normalizedDraft[1]];
+              inversePatches = [...normalizedDraft[2], ...inversePatches];
+            }
           );
-        } else if (action.type === HISTORY_ACTIONS.MERGE) {
-          history.merge(patches, inversePatches);
-        } else {
-          history.add(patches, inversePatches);
         }
-      }
 
-      return finalState;
+        if (
+          [HISTORY_ACTIONS.UNDO, HISTORY_ACTIONS.REDO].includes(
+            action.type as any
+          ) &&
+          normalizeHistory
+        ) {
+          const normalized = produceWithPatches(finalState, normalizeHistory);
+          finalState = normalized[0];
+          patches = [...patches, ...normalized[1]];
+          inversePatches = [...normalized[2], ...inversePatches];
+        }
+
+        const validateChange = validateChangeRef.current;
+        if (validateChange) {
+          const accepted: unknown = validateChange(
+            finalState,
+            state,
+            action,
+            patches
+          );
+          if (
+            accepted &&
+            (typeof accepted === 'object' || typeof accepted === 'function') &&
+            'then' in accepted &&
+            typeof accepted.then === 'function'
+          ) {
+            throw new TypeError(
+              'validateChange must be synchronous; Promise/thenable results are not supported.'
+            );
+          }
+          if (accepted === false) {
+            restoreHistory();
+            return { state, accepted: false };
+          }
+        }
+
+        if (
+          ![
+            ...ignoreHistoryForActions,
+            HISTORY_ACTIONS.UNDO,
+            HISTORY_ACTIONS.REDO,
+            HISTORY_ACTIONS.IGNORE,
+            HISTORY_ACTIONS.CLEAR,
+          ].includes(action.type as any)
+        ) {
+          if (action.type === HISTORY_ACTIONS.THROTTLE) {
+            history.throttleAdd(
+              patches,
+              inversePatches,
+              action.config && action.config.rate
+            );
+          } else if (action.type === HISTORY_ACTIONS.MERGE) {
+            history.merge(patches, inversePatches);
+          } else {
+            history.add(patches, inversePatches);
+          }
+        }
+
+        return { state: finalState, accepted: true };
+      } catch (error) {
+        restoreHistory();
+        throw error;
+      }
     };
   }, [history, methodsFactory, queryMethods]);
 
@@ -310,8 +357,11 @@ export function useMethods<
 
   const dispatch = useCallback(
     (action: any) => {
-      const newState = reducer(stateRef.current, action);
-      stateRef.current = newState;
+      const change = reducer(stateRef.current, action);
+      if (!change.accepted) {
+        return;
+      }
+      stateRef.current = change.state;
       watcher.notify();
     },
     [reducer, watcher]

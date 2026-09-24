@@ -43,13 +43,14 @@ describe('Editor node change notifications', () => {
     expect(serialize).not.toHaveBeenCalled();
   });
 
-  it('notifies a supplied callback only when serialized nodes change', () => {
+  it('notifies every accepted store update without serializing nodes', () => {
     const onNodesChange = jest.fn();
     render(
       <Editor onNodesChange={onNodesChange}>
         <CaptureStore />
       </Editor>
     );
+    const serialize = jest.spyOn(store.query, 'serialize');
 
     changeNode('one');
     expect(onNodesChange).toHaveBeenCalledTimes(1);
@@ -57,10 +58,14 @@ describe('Editor node change notifications', () => {
 
     act(() =>
       store.actions.setOptions((options) => {
-        options.enabled = false;
+        options.indicator.success = 'magenta';
       })
     );
-    expect(onNodesChange).toHaveBeenCalledTimes(1);
+    expect(onNodesChange).toHaveBeenCalledTimes(2);
+    act(() => store.actions.setDOM('test', document.createElement('div')));
+    act(() => store.actions.selectNode('test'));
+    expect(onNodesChange).toHaveBeenCalledTimes(4);
+    expect(serialize).not.toHaveBeenCalled();
   });
 
   it('supports a callback added after mounting through setOptions', () => {
@@ -125,7 +130,8 @@ describe('Editor node change notifications', () => {
     changeNode('two');
 
     expect(original).not.toHaveBeenCalled();
-    expect(replacement).toHaveBeenCalledTimes(1);
+    // Replacing options is itself a store notification, followed by the edit.
+    expect(replacement).toHaveBeenCalledTimes(2);
   });
 
   it('cleans up subscriptions across StrictMode remounts and unmount', () => {

@@ -45,16 +45,20 @@ export const Editor = ({ children, ...options }: EditorProps) => {
         let actionType = actionPerformed.type;
 
         if (
-          [HISTORY_ACTIONS.IGNORE, HISTORY_ACTIONS.THROTTLE].includes(
-            actionType
-          ) &&
+          [
+            HISTORY_ACTIONS.IGNORE,
+            HISTORY_ACTIONS.MERGE,
+            HISTORY_ACTIONS.THROTTLE,
+          ].includes(actionType) &&
           actionPerformed.params
         ) {
           actionPerformed.type = actionPerformed.params[0];
         }
 
         if (
-          ['setState', 'deserialize'].includes(actionPerformed.type) ||
+          ['setState', 'deserialize', 'transact'].includes(
+            actionPerformed.type
+          ) ||
           isModifyingNodeData
         ) {
           normalizer((draft) => {
@@ -92,20 +96,37 @@ export const Editor = ({ children, ...options }: EditorProps) => {
   }, [context, options.enabled]);
 
   React.useEffect(() => {
+    if (!context) return;
+    const current = context.query.getOptions();
+    const changePolicy =
+      options.editAccess !== undefined &&
+      current.editAccess !== options.editAccess;
+    const changeCallback =
+      options.onEditDenied !== undefined &&
+      current.onEditDenied !== options.onEditDenied;
+    if (!changePolicy && !changeCallback) return;
+    context.actions.setOptions((editorOptions) => {
+      if (changePolicy) editorOptions.editAccess = options.editAccess;
+      if (changeCallback) editorOptions.onEditDenied = options.onEditDenied;
+    });
+  }, [context, options.editAccess, options.onEditDenied]);
+
+  React.useEffect(() => {
     if (!context) {
       return;
     }
 
-    // Read current store options so setOptions can enable notifications later.
-    // The default no-op callback does not need full-tree serialization.
+    // Preserve the Designer patch's per-notification semantics without serializing
+    // the whole tree. Read current options to support dynamically added callbacks.
+    let revision = 0;
     return context.subscribe(
       (state) => ({
-        json:
+        revision:
           state.options.onNodesChange &&
           state.options.onNodesChange !==
             editorInitialState.options.onNodesChange
-            ? context.query.serialize()
-            : null,
+            ? ++revision
+            : revision,
       }),
       () => {
         const { onNodesChange } = context.query.getOptions();

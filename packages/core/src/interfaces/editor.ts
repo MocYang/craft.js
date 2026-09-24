@@ -1,5 +1,7 @@
 import { QueryCallbacksFor, Delete, PatchListenerAction } from '@craftjs/utils';
 
+import { EditAccessPolicy } from './editAccess';
+import { EditDenied } from './editTransaction';
 import { Placement } from './events';
 import { Nodes, NodeEventTypes, NodeId, Node } from './nodes';
 
@@ -9,15 +11,19 @@ import { useInternalEditorReturnType } from '../editor/useInternalEditor';
 import { CoreEventHandlers } from '../events';
 
 export type Options = {
+  onEditDenied?: (denial: EditDenied) => void;
   onRender: React.ComponentType<{ render: React.ReactElement }>;
   onBeforeMoveEnd: (
     targetNode: Node,
     newParentNode: Node,
     existingParentNode: Node
   ) => void;
+  /** Called on store notifications, including DOM/events; does not serialize or diff nodes. */
   onNodesChange: (query: QueryCallbacksFor<typeof QueryMethods>) => void;
   resolver: Resolver;
   enabled: boolean;
+  /** Opt-in node editing protection. Omit or use false for legacy behavior. */
+  editAccess?: boolean | EditAccessPolicy;
   indicator: Partial<{
     success: string;
     error: string;

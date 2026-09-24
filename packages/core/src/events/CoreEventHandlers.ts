@@ -27,5 +27,5 @@ export class CoreEventHandlers<O = {}> extends EventHandlers<
 }
 
 export abstract class DerivedCoreEventHandlers<
-  O = {}
+  O extends Record<string, any> = {}
 > extends DerivedEventHandlers<CoreEventHandlers, O> {}
