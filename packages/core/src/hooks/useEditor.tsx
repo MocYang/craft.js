@@ -1,4 +1,9 @@
-import { Overwrite, Delete, OverwriteFnReturnType } from '@craftjs/utils';
+import {
+  Overwrite,
+  Delete,
+  OverwriteFnReturnType,
+  SubscribeOptions,
+} from '@craftjs/utils';
 import { useMemo } from 'react';
 
 import {
@@ -60,21 +65,35 @@ export type useEditorReturnType<S = null> = Overwrite<
  */
 export function useEditor(): useEditorReturnType;
 export function useEditor<S>(
-  collect: EditorCollector<S>
+  collect: EditorCollector<S>,
+  options?: SubscribeOptions
 ): useEditorReturnType<S>;
 
-export function useEditor<S>(collect?: any): useEditorReturnType<S> {
+export function useEditor<S>(
+  collect?: any,
+  options?: SubscribeOptions
+): useEditorReturnType<S> {
   const {
     connectors,
     actions: internalActions,
     query,
     store,
     ...collected
-  } = useInternalEditor(collect);
+  } = useInternalEditor(collect, options);
 
-  const EditorActions = getPublicActions(internalActions);
-
+  // getPublicActions() strips six private actions and spreads the rest, so it always
+  // returns a fresh object. It used to run unconditionally during render and then serve
+  // as this useMemo's dependency, which meant the memo never hit: every useEditor call
+  // site rebuilt `actions` on every render. Worse, the new identity cascaded — every
+  // downstream useCallback/useMemo/useEffect that depends on `actions` was invalidated
+  // too. With thousands of components each calling useEditor, that adds up.
+  //
+  // `internalActions` comes straight off the store instance (see useCollector), so its
+  // identity is stable. Moving the computation inside the memo and depending on it
+  // instead makes `actions` genuinely stable.
   const actions = useMemo(() => {
+    const EditorActions = getPublicActions(internalActions);
+
     return {
       ...EditorActions,
       history: {
@@ -85,7 +104,7 @@ export function useEditor<S>(collect?: any): useEditorReturnType<S> {
           getPublicActions(EditorActions.history.throttle(...args)),
       },
     };
-  }, [EditorActions]);
+  }, [internalActions]);
 
   return {
     connectors,

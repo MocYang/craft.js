@@ -12,9 +12,13 @@ let nodeContext = {
 
 let node: Partial<NodeData> = {};
 let onRender = jest.fn();
+const useInternalEditorSpy = jest.fn();
 
 jest.mock('../../editor/useInternalEditor', () => ({
-  useInternalEditor: () => ({ onRender }),
+  useInternalEditor: (...args) => {
+    useInternalEditorSpy(...args);
+    return { onRender };
+  },
 }));
 
 jest.mock('../../nodes/useInternalNode', () => ({
@@ -39,6 +43,18 @@ describe('<RenderNode />', () => {
 
   beforeEach(() => {
     onRender = jest.fn().mockImplementation(({ render }) => render);
+    useInternalEditorSpy.mockClear();
+  });
+
+  // This component is mounted once per Node. Without a declared dependency every
+  // rendered Node becomes a global subscriber and runs its collector on every dispatch.
+  it('should subscribe to options.onRender only', () => {
+    node = { type: 'h1', props: {} };
+    render(<RenderNodeToElement />);
+
+    expect(useInternalEditorSpy).toHaveBeenCalledWith(expect.any(Function), {
+      dependencies: [['options', 'onRender']],
+    });
   });
 
   describe('When the node is hidden', () => {

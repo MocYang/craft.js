@@ -31,8 +31,51 @@ export class DefaultEventHandlers<O = {}> extends CoreEventHandlers<
   positioner: Positioner | null = null;
   currentSelectedElementIds = [];
 
+  /**
+   * Pending DOM registrations, flushed once per microtask.
+   *
+   * `connect()` runs once per Node as it mounts. Dispatching `setDOM` for each one
+   * means mounting N nodes costs N dispatches, and every dispatch runs a full
+   * subscriber broadcast. Batching collapses that into a single dispatch.
+   *
+   * These live on the handler instance (one per store), not inside `handlers()`,
+   * because `handlers()` is re-invoked for every `createConnectorsUsage()` — a
+   * queue held in that closure would be per-hook and would never actually batch.
+   */
+  private pendingDOMUpdates: Map<NodeId, HTMLElement> = new Map();
+  private isDOMFlushScheduled = false;
+
   onDisable() {
     this.options.store.actions.clearEvents();
+  }
+
+  /**
+   * Queues a Node's DOM element and schedules a single batched `setDOM` dispatch.
+   *
+   * Note the DOM is only written to the store on the next microtask, so `node.dom`
+   * is still empty within the synchronous block that called `connect()`. Every
+   * consumer of `node.dom` (Positioner, RenderEditorIndicator) reads it from an
+   * event callback, which is well past that point.
+   */
+  private scheduleDOMUpdate(id: NodeId, el: HTMLElement) {
+    this.pendingDOMUpdates.set(id, el);
+
+    if (this.isDOMFlushScheduled) {
+      return;
+    }
+
+    this.isDOMFlushScheduled = true;
+
+    queueMicrotask(() => {
+      this.isDOMFlushScheduled = false;
+
+      const batch = Array.from(this.pendingDOMUpdates);
+      this.pendingDOMUpdates.clear();
+
+      if (batch.length) {
+        this.options.store.actions.setDOM(batch);
+      }
+    });
   }
 
   handlers() {
@@ -40,7 +83,7 @@ export class DefaultEventHandlers<O = {}> extends CoreEventHandlers<
 
     return {
       connect: (el: HTMLElement, id: NodeId) => {
-        store.actions.setDOM(id, el);
+        this.scheduleDOMUpdate(id, el);
 
         return this.reflect((connectors) => {
           connectors.select(el, id);

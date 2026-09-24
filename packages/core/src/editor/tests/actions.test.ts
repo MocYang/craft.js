@@ -561,6 +561,31 @@ describe('actions.setNodeEvent', () => {
       })
     );
   });
+
+  it('does not rewrite an unchanged event set', () => {
+    Actions(state)((actions) => actions.setNodeEvent('selected', ['node-a']));
+    const selected = state.events.selected;
+
+    const nextState = Actions(state)((actions) =>
+      actions.setNodeEvent('selected', ['node-a'])
+    );
+
+    expect(nextState.events.selected).toBe(selected);
+    expect(nextState.nodes['node-a'].events.selected).toBe(true);
+  });
+
+  it('treats the same event ids in another order as unchanged', () => {
+    Actions(state)((actions) =>
+      actions.setNodeEvent('selected', ['node-a', 'node-b'])
+    );
+    const selected = state.events.selected;
+
+    const nextState = Actions(state)((actions) =>
+      actions.setNodeEvent('selected', ['node-b', 'node-a'])
+    );
+
+    expect(nextState.events.selected).toBe(selected);
+  });
 });
 
 describe('actions.setProp', () => {
@@ -725,6 +750,60 @@ describe('actions.setDOM', () => {
     const dom = document.createElement('button');
 
     const newState = Actions(state)((actions) => actions.setDOM('node-a', dom));
+
+    nodeA.dom = dom;
+
+    expectEditorState(
+      newState,
+      createTestState({
+        nodes: {
+          id: 'root',
+          data: {
+            type: 'div',
+            nodes: [nodeA],
+          },
+        },
+      })
+    );
+  });
+
+  it('should set DOM for a batch of [id, dom] pairs', () => {
+    const rootDom = document.createElement('div');
+    const dom = document.createElement('button');
+
+    const newState = Actions(state)((actions) =>
+      actions.setDOM([
+        ['root', rootDom],
+        ['node-a', dom],
+      ])
+    );
+
+    nodeA.dom = dom;
+
+    expectEditorState(
+      newState,
+      createTestState({
+        nodes: {
+          id: 'root',
+          dom: rootDom,
+          data: {
+            type: 'div',
+            nodes: [nodeA],
+          },
+        },
+      })
+    );
+  });
+
+  it('should ignore unknown ids in a batch without throwing', () => {
+    const dom = document.createElement('button');
+
+    const newState = Actions(state)((actions) =>
+      actions.setDOM([
+        ['node-does-not-exist', document.createElement('div')],
+        ['node-a', dom],
+      ])
+    );
 
     nodeA.dom = dom;
 

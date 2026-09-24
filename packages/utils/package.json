@@ -12,8 +12,12 @@
     "lib"
   ],
   "scripts": {
-    "start": "cross-env NODE_ENV=development ../../scripts/build.sh",
-    "build": "cross-env NODE_ENV=production ../../scripts/build.sh",
+    "start": "npx --no-install cross-env NODE_ENV=development npx --no-install run-p typecheck:watch bundle:watch",
+    "build": "npx --no-install cross-env NODE_ENV=production npx --no-install run-p typecheck bundle",
+    "typecheck:watch": "npx --no-install tsc --skipLibCheck --emitDeclarationOnly -w",
+    "bundle:watch": "npx --no-install rollup -c rollup.config.js -w",
+    "typecheck": "npx --no-install tsc --skipLibCheck --emitDeclarationOnly",
+    "bundle": "npx --no-install rollup -c rollup.config.js",
     "dev:yalc": "../../scripts/yalc.sh",
     "clean": "rimraf lib dist"
   },

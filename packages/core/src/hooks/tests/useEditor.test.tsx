@@ -34,7 +34,7 @@ describe('useEditor', () => {
     editor = useEditor(collect);
   });
   it('should have called internal state with collect', () => {
-    expect(useInternalEditor).toHaveBeenCalledWith(collect);
+    expect(useInternalEditor).toHaveBeenCalledWith(collect, undefined);
   });
   it('should return the correct editor', () => {
     expect(editor).toEqual(

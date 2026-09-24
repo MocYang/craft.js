@@ -339,24 +339,28 @@ const Methods = (
       eventType: NodeEventTypes,
       nodeIdSelector: NodeSelector<NodeSelectorType.Id>
     ) {
+      const targets = nodeIdSelector
+        ? getNodesFromSelector(state.nodes, nodeIdSelector, {
+            idOnly: true,
+            existOnly: true,
+          })
+        : [];
+      const nodeIds = new Set(targets.map(({ node }) => node.id));
+      const previousIds = state.events[eventType];
+
+      if (
+        previousIds.size === nodeIds.size &&
+        Array.from(previousIds).every((id) => nodeIds.has(id))
+      ) {
+        return;
+      }
+
       state.events[eventType].forEach((id) => {
         if (state.nodes[id]) {
           state.nodes[id].events[eventType] = false;
         }
       });
 
-      state.events[eventType] = new Set();
-
-      if (!nodeIdSelector) {
-        return;
-      }
-
-      const targets = getNodesFromSelector(state.nodes, nodeIdSelector, {
-        idOnly: true,
-        existOnly: true,
-      });
-
-      const nodeIds: Set<NodeId> = new Set(targets.map(({ node }) => node.id));
       nodeIds.forEach((id) => {
         state.nodes[id].events[eventType] = true;
       });
@@ -383,15 +387,36 @@ const Methods = (
     /**
      * Given a `id`, it will set the `dom` porperty of that node.
      *
-     * @param id of the node we want to set
+     * Also accepts a batch of `[id, dom]` pairs so that a whole subtree's DOM
+     * registration can be applied in a single dispatch. Mounting N nodes used to
+     * mean N dispatches, each one triggering a full subscriber broadcast.
+     *
+     * @param id of the node we want to set, or a batch of [id, dom] pairs
      * @param dom
      */
-    setDOM(id: NodeId, dom: HTMLElement) {
-      if (!state.nodes[id]) {
+    setDOM(
+      id: NodeId | ReadonlyArray<[NodeId, HTMLElement]>,
+      dom?: HTMLElement
+    ) {
+      if (Array.isArray(id)) {
+        id.forEach(([nodeId, nodeDom]) => {
+          if (!state.nodes[nodeId]) {
+            return;
+          }
+
+          state.nodes[nodeId].dom = nodeDom;
+        });
+
         return;
       }
 
-      state.nodes[id].dom = dom;
+      const nodeId = id as NodeId;
+
+      if (!state.nodes[nodeId]) {
+        return;
+      }
+
+      state.nodes[nodeId].dom = dom;
     },
 
     setIndicator(indicator: Indicator | null) {

@@ -2,6 +2,7 @@ import {
   useCollector,
   useCollectorReturnType,
   QueryCallbacksFor,
+  SubscribeOptions,
   wrapConnectorHooks,
   EventHandlerConnectors,
   ERROR_USE_EDITOR_OUTSIDE_OF_EDITOR_CONTEXT,
@@ -32,13 +33,14 @@ export type useInternalEditorReturnType<C = null> = useCollectorReturnType<
 };
 
 export function useInternalEditor<C>(
-  collector?: EditorCollector<C>
+  collector?: EditorCollector<C>,
+  options?: SubscribeOptions
 ): useInternalEditorReturnType<C> {
   const handler = useEventHandler();
   const store = useContext(EditorContext);
   invariant(store, ERROR_USE_EDITOR_OUTSIDE_OF_EDITOR_CONTEXT);
 
-  const collected = useCollector(store, collector);
+  const collected = useCollector(store, collector, options);
 
   const connectorsUsage = useMemo(
     () => handler && handler.createConnectorsUsage(),

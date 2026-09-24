@@ -15,6 +15,10 @@ export function useInternalNode<S = null>(collect?: (node: Node) => S) {
   invariant(context, ERROR_USE_NODE_OUTSIDE_OF_EDITOR_CONTEXT);
 
   const { id, related } = context;
+  const subscriptionOptions = useMemo(
+    () => ({ dependencies: [['nodes', id]] }),
+    [id]
+  );
 
   const {
     actions: EditorActions,
@@ -22,7 +26,10 @@ export function useInternalNode<S = null>(collect?: (node: Node) => S) {
     connectors: editorConnectors,
     ...collected
   } = useInternalEditor(
-    (state) => id && state.nodes[id] && collect && collect(state.nodes[id])
+    collect
+      ? (state) => id && state.nodes[id] && collect(state.nodes[id])
+      : undefined,
+    subscriptionOptions
   );
 
   const connectors = useMemo(

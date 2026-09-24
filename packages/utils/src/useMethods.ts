@@ -1,10 +1,5 @@
 // https://github.com/pelotom/use-methods
-import produce, {
-  Patch,
-  produceWithPatches,
-  enableMapSet,
-  enablePatches,
-} from 'immer';
+import { Patch, produceWithPatches, enableMapSet, enablePatches } from 'immer';
 import isEqualWith from 'lodash/isEqualWith';
 import { useMemo, useEffect, useRef, useCallback } from 'react';
 
@@ -18,11 +13,36 @@ export type SubscriberAndCallbacksFor<
   M extends MethodsOrOptions,
   Q extends QueryMethods = any
 > = {
-  subscribe: Watcher<StateFor<M>>['subscribe'];
+  subscribe: <C>(
+    collector: (state: StateFor<M>) => C,
+    onChange: (collected: C) => void,
+    collectOnCreate?: boolean,
+    options?: SubscribeOptions
+  ) => () => void;
   getState: () => { prev: StateFor<M>; current: StateFor<M> };
   actions: CallbacksFor<M>;
   query: QueryCallbacksFor<Q>;
   history: History;
+};
+
+export type StatePath = ReadonlyArray<string | number>;
+
+export type SubscribeOptions = {
+  /**
+   * Paths read by the collector. Omitting this keeps the legacy global
+   * subscription behavior.
+   */
+  dependencies?: ReadonlyArray<StatePath>;
+  /**
+   * The value the caller already collected, used to seed the Subscriber's
+   * baseline.
+   *
+   * Without it a Subscriber starts at `undefined`, so the first notify after
+   * subscribing always compares against `undefined`, always "changes", and
+   * always fires onChange — even when the collected value is identical to what
+   * the caller rendered with. That is one wasted re-render per subscription.
+   */
+  initialCollected?: any;
 };
 
 export type StateFor<M extends MethodsOrOptions> = M extends MethodsOrOptions<
@@ -276,7 +296,10 @@ export function useMethods<
         ) &&
         normalizeHistory
       ) {
-        finalState = produce(finalState, normalizeHistory);
+        const normalized = produceWithPatches(finalState, normalizeHistory);
+        finalState = normalized[0];
+        patches = [...patches, ...normalized[1]];
+        inversePatches = [...normalized[2], ...inversePatches];
       }
 
       if (
@@ -301,7 +324,7 @@ export function useMethods<
         }
       }
 
-      return finalState;
+      return { state: finalState, patches };
     };
   }, [history, methodsFactory, queryMethods]);
 
@@ -310,9 +333,13 @@ export function useMethods<
 
   const dispatch = useCallback(
     (action: any) => {
-      const newState = reducer(stateRef.current, action);
+      const previousState = stateRef.current;
+      const { state: newState, patches } = reducer(previousState, action);
       stateRef.current = newState;
-      watcher.notify();
+
+      if (newState !== previousState) {
+        watcher.notify(patches);
+      }
     },
     [reducer, watcher]
   );
@@ -407,8 +434,8 @@ export function useMethods<
   return useMemo(
     () => ({
       getState,
-      subscribe: (collector, cb, collectOnCreate) =>
-        watcher.subscribe(collector, cb, collectOnCreate),
+      subscribe: (collector, cb, collectOnCreate, options) =>
+        watcher.subscribe(collector, cb, collectOnCreate, options),
       actions,
       query,
       history,
@@ -442,7 +469,8 @@ export function createQuery<Q extends QueryMethods>(
 
 class Watcher<S> {
   getState;
-  subscribers: Subscriber[] = [];
+  globalSubscribers = new Set<Subscriber>();
+  root = new SubscriptionPathNode();
 
   constructor(getState) {
     this.getState = getState;
@@ -455,34 +483,130 @@ class Watcher<S> {
   subscribe<C>(
     collector: (state: S) => C,
     onChange: (collected: C) => void,
-    collectOnCreate?: boolean
+    collectOnCreate?: boolean,
+    options?: SubscribeOptions
   ): () => void {
     const subscriber = new Subscriber(
       () => collector(this.getState()),
       onChange,
-      collectOnCreate
+      collectOnCreate,
+      options?.dependencies,
+      options?.initialCollected
     );
-    this.subscribers.push(subscriber);
+
+    const hasDependencies = !!subscriber.dependencies?.length;
+
+    if (hasDependencies) {
+      subscriber.dependencies.forEach((path) => this.addPath(path, subscriber));
+    } else {
+      this.globalSubscribers.add(subscriber);
+    }
+
     return this.unsubscribe.bind(this, subscriber);
   }
 
   unsubscribe(subscriber) {
-    if (this.subscribers.length) {
-      const index = this.subscribers.indexOf(subscriber);
-      if (index > -1) return this.subscribers.splice(index, 1);
+    const hasDependencies = !!subscriber.dependencies?.length;
+
+    if (hasDependencies) {
+      subscriber.dependencies.forEach((path) =>
+        this.removePath(path, subscriber)
+      );
+    } else {
+      this.globalSubscribers.delete(subscriber);
     }
   }
 
-  notify() {
-    this.subscribers.forEach((subscriber) => subscriber.collect());
+  notify(patches?: Patch[]) {
+    const useIndex = !!patches?.length;
+
+    const subscribers = useIndex
+      ? this.collectSubscribers(patches)
+      : this.collectAllSubscribers();
+
+    subscribers.forEach((subscriber) => subscriber.collect());
   }
+
+  addPath(path: StatePath, subscriber: Subscriber) {
+    let node = this.root;
+    node.subtree.add(subscriber);
+
+    path.forEach((segment) => {
+      let child = node.children.get(segment);
+      if (!child) {
+        child = new SubscriptionPathNode();
+        node.children.set(segment, child);
+      }
+      node = child;
+      node.subtree.add(subscriber);
+    });
+
+    node.exact.add(subscriber);
+  }
+
+  removePath(path: StatePath, subscriber: Subscriber) {
+    const nodes = [this.root];
+    let node = this.root;
+
+    for (const segment of path) {
+      const child = node.children.get(segment);
+      if (!child) {
+        return;
+      }
+
+      node = child;
+      nodes.push(node);
+    }
+
+    node.exact.delete(subscriber);
+    nodes.forEach((current) => current.subtree.delete(subscriber));
+
+    // Drop empty branches so dynamic NodeIds do not grow the index forever.
+    for (let index = nodes.length - 1; index > 0; index -= 1) {
+      const current = nodes[index];
+      if (current.exact.size || current.subtree.size || current.children.size) {
+        break;
+      }
+
+      nodes[index - 1].children.delete(path[index - 1]);
+    }
+  }
+
+  collectAllSubscribers() {
+    return new Set([...this.globalSubscribers, ...this.root.subtree]);
+  }
+
+  collectSubscribers(patches: Patch[]) {
+    const subscribers = new Set(this.globalSubscribers);
+
+    patches.forEach(({ path }) => {
+      let node = this.root;
+      node.exact.forEach((subscriber) => subscribers.add(subscriber));
+
+      for (const segment of path as StatePath) {
+        node = node.children.get(segment);
+        if (!node) return;
+        node.exact.forEach((subscriber) => subscribers.add(subscriber));
+      }
+
+      node.subtree.forEach((subscriber) => subscribers.add(subscriber));
+    });
+
+    return subscribers;
+  }
+}
+
+class SubscriptionPathNode {
+  children = new Map<string | number, SubscriptionPathNode>();
+  exact = new Set<Subscriber>();
+  subtree = new Set<Subscriber>();
 }
 
 class Subscriber {
   collected: any;
   collector: () => any;
   onChange: (collected: any) => void;
-  id;
+  dependencies?: ReadonlyArray<StatePath>;
 
   /**
    * Creates a Subscriber
@@ -490,9 +614,19 @@ class Subscriber {
    * @param onChange A callback method that is triggered when the collected values has changed
    * @param collectOnCreate If set to true, the collector/onChange will be called on instantiation
    */
-  constructor(collector, onChange, collectOnCreate = false) {
+  constructor(
+    collector,
+    onChange,
+    collectOnCreate = false,
+    dependencies?,
+    initialCollected?
+  ) {
     this.collector = collector;
     this.onChange = onChange;
+    this.dependencies = dependencies;
+    // Seed the baseline so the first notify doesn't compare against undefined
+    // and report a change that never happened. See SubscribeOptions.initialCollected.
+    this.collected = initialCollected;
 
     // Collect and run onChange callback when Subscriber is created
     if (collectOnCreate) this.collect();
