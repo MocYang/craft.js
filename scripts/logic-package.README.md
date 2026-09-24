@@ -210,6 +210,39 @@ to locked geometry. Viewer data held outside the Craft document is unaffected.
 
 ## Development and publishing
 
+### Automatic publishing with GitHub OIDC
+
+`.github/workflows/release.yml` publishes only `@deepctrls/craftjs`. Bump the
+stable version in `scripts/logic-package.json` and push to `main`, or run the
+workflow manually from the Actions page. Existing npm versions are verified but
+never republished. Registry failures stop the workflow rather than being treated
+as a missing version.
+
+The verification job runs the release checks, complete Jest suite, builds, lint,
+and independent React 18/19 tarball checks. The publish job downloads that exact
+artifact and uses `id-token: write` with npm 11.20.0 to publish with provenance.
+No `NPM_TOKEN` or `NODE_AUTH_TOKEN` secret is required. The GitHub-hosted runner
+and workflow identity must match the package's Trusted Publisher configuration:
+
+| Setting | Value |
+| --- | --- |
+| Provider | GitHub Actions |
+| Owner | `hnldlsjzt` |
+| Repository | `craft.js` |
+| Workflow filename | `release.yml` |
+| Environment | Leave empty |
+
+A package maintainer can establish this one-time trust from an interactive
+terminal (npm may require 2FA for changing account/package settings):
+
+```sh
+npx --yes --registry=https://registry.npmjs.org/ npm@11.20.0 trust github @deepctrls/craftjs --repo=hnldlsjzt/craft.js --file=release.yml --allow-publish --yes --registry=https://registry.npmjs.org/
+```
+
+See [npm Trusted Publishing](https://docs.npmjs.com/trusted-publishers).
+
+### Local build and manual publishing
+
 The monorepo keeps the upstream workspace names so examples and internal
 dependencies continue to resolve. The release process builds the utilities and
 core, then stages the renamed core package with CommonJS, ES modules, and
