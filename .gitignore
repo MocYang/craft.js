@@ -1,4 +1,7 @@
 node_modules
+/release/
+/logic-craftjs-*.tgz
+/deepctrls-craftjs-*.tgz
 .cache
 *-cache
 out

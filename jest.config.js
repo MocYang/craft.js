@@ -6,7 +6,7 @@ module.exports = {
   setupFilesAfterEnv: ['<rootDir>/jest/setup.js'],
   clearMocks: true,
   testEnvironment: 'jsdom',
-  testMatch: ['<rootDir>/packages/**/?(*.)test.ts(x|)'],
+  testMatch: ['**/packages/**/*.test.ts?(x)'],
   transform: {
     '^.+\\.(ts|tsx|js|jsx)$': [
       'ts-jest',
@@ -17,6 +17,9 @@ module.exports = {
   },
   transformIgnorePatterns: [`/node_modules/(?!${esModules})`],
   moduleNameMapper: {
-    '^nanoid(/(.*)|$)': 'nanoid$1',
+    '^@craftjs/core$': '<rootDir>/packages/core/src/index.tsx',
+    '^@craftjs/utils$': '<rootDir>/packages/utils/src/index.ts',
+    '^@craftjs/utils/(.*)$': '<rootDir>/packages/utils/src/$1',
+    '^nanoid$': require.resolve('nanoid'),
   },
 };

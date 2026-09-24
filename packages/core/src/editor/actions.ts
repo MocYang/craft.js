@@ -26,6 +26,8 @@ import {
   SerializedNodes,
   NodeSelector,
   NodeSelectorType,
+  EditorLock,
+  EditTransactionContext,
 } from '../interfaces';
 import { fromEntries } from '../utils/fromEntries';
 import { getNodesFromSelector } from '../utils/getNodesFromSelector';
@@ -394,19 +396,16 @@ const Methods = (
      * @param id of the node we want to set, or a batch of [id, dom] pairs
      * @param dom
      */
-    setDOM(
-      id: NodeId | ReadonlyArray<[NodeId, HTMLElement]>,
-      dom?: HTMLElement
-    ) {
-      if (Array.isArray(id)) {
-        id.forEach(([nodeId, nodeDom]) => {
-          if (!state.nodes[nodeId]) {
-            return;
-          }
-
-          state.nodes[nodeId].dom = nodeDom;
+    setDOM(...args: [NodeId, HTMLElement] | [[NodeId, HTMLElement][]]) {
+      if (Array.isArray(args[0])) {
+        args[0].forEach(([id, dom]) => {
+          if (state.nodes[id]) state.nodes[id].dom = dom;
         });
+        return;
+      }
 
+      const [id, dom] = args;
+      if (!state.nodes[id]) {
         return;
       }
 
@@ -482,6 +481,28 @@ export const ActionMethods = (
 ) => {
   return {
     ...Methods(state, query),
+    /** Update the persisted editing lock without changing other custom data. */
+    setEditorLock(
+      selector: NodeSelector<NodeSelectorType.Id>,
+      lock: EditorLock
+    ) {
+      invariant(['', 'position', 'all'].includes(lock), 'Invalid editor lock');
+      this.setCustom(selector, (custom) => {
+        if (lock) custom.editorLock = lock;
+        else delete custom.editorLock;
+      });
+    },
+    /** One synchronous recipe, one permission decision, one history entry. */
+    transact(
+      context: EditTransactionContext,
+      cb: (actions: Delete<CallbacksFor<typeof Methods>, 'history'>) => void
+    ) {
+      const result = cb(Methods(state, query)) as unknown;
+      invariant(
+        !result || typeof (result as any).then !== 'function',
+        'Edit transactions must be synchronous'
+      );
+    },
     // Note: Beware: advanced method! You most likely don't need to use this
     // TODO: fix parameter types and cleanup the method
     setState(

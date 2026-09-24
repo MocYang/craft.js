@@ -1,8 +1,156 @@
-import { render, act } from '@testing-library/react';
-import React from 'react';
+import { act, render } from '@testing-library/react';
+import React, { useContext } from 'react';
 
 import { useEditor } from '../../hooks/useEditor';
+import { createNode } from '../../utils/createNode';
 import { Editor } from '../Editor';
+import { EditorContext } from '../EditorContext';
+import { EditorStore } from '../store';
+
+describe('Editor node change notifications', () => {
+  let store: EditorStore;
+
+  const CaptureStore = () => {
+    store = useContext(EditorContext);
+    return null;
+  };
+
+  const changeNode = (title: string) => {
+    act(() => {
+      store.actions.setState((state) => {
+        state.nodes.test = createNode({
+          id: 'test',
+          data: { type: 'div', props: { title } },
+        });
+      });
+    });
+  };
+
+  it('does not serialize nodes when no callback is configured', () => {
+    render(
+      <Editor>
+        <CaptureStore />
+      </Editor>
+    );
+    const serialize = jest.spyOn(store.query, 'serialize');
+
+    changeNode('one');
+    act(() =>
+      store.actions.setOptions((options) => {
+        options.enabled = false;
+      })
+    );
+
+    expect(serialize).not.toHaveBeenCalled();
+  });
+
+  it('notifies node data changes without serializing nodes', () => {
+    const onNodesChange = jest.fn();
+    render(
+      <Editor onNodesChange={onNodesChange}>
+        <CaptureStore />
+      </Editor>
+    );
+    const serialize = jest.spyOn(store.query, 'serialize');
+
+    changeNode('one');
+    expect(onNodesChange).toHaveBeenCalledTimes(1);
+    expect(onNodesChange).toHaveBeenCalledWith(store.query);
+
+    act(() =>
+      store.actions.setOptions((options) => {
+        options.indicator.success = 'magenta';
+      })
+    );
+    expect(onNodesChange).toHaveBeenCalledTimes(1);
+    act(() => store.actions.setDOM('test', document.createElement('div')));
+    act(() => store.actions.selectNode('test'));
+    expect(onNodesChange).toHaveBeenCalledTimes(1);
+    expect(serialize).not.toHaveBeenCalled();
+  });
+
+  it('uses a callback added after mounting on the next data change', () => {
+    const lateCallback = jest.fn();
+    render(
+      <Editor>
+        <CaptureStore />
+      </Editor>
+    );
+
+    act(() =>
+      store.actions.setOptions((options) => {
+        options.onNodesChange = lateCallback;
+      })
+    );
+    expect(lateCallback).not.toHaveBeenCalled();
+    changeNode('one');
+    expect(lateCallback).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses a replacement callback only on subsequent data changes', () => {
+    const original = jest.fn();
+    const replacement = jest.fn();
+    render(
+      <Editor onNodesChange={original}>
+        <CaptureStore />
+      </Editor>
+    );
+    changeNode('one');
+    original.mockClear();
+
+    act(() =>
+      store.actions.setOptions((options) => {
+        options.onNodesChange = replacement;
+      })
+    );
+    expect(replacement).not.toHaveBeenCalled();
+    changeNode('two');
+    expect(original).not.toHaveBeenCalled();
+    expect(replacement).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not notify for the first unrelated store updates', () => {
+    const onNodesChange = jest.fn();
+    render(
+      <Editor onNodesChange={onNodesChange}>
+        <CaptureStore />
+      </Editor>
+    );
+
+    act(() =>
+      store.actions.setOptions((options) => {
+        options.indicator.success = 'magenta';
+      })
+    );
+    act(() => store.actions.setNodeEvent('hovered', null));
+    expect(onNodesChange).not.toHaveBeenCalled();
+
+    changeNode('one');
+    expect(onNodesChange).toHaveBeenCalledTimes(1);
+  });
+
+  it('cleans up subscriptions across StrictMode remounts and unmount', () => {
+    const onNodesChange = jest.fn();
+    const { unmount } = render(
+      <React.StrictMode>
+        <Editor onNodesChange={onNodesChange}>
+          <CaptureStore />
+        </Editor>
+      </React.StrictMode>
+    );
+    onNodesChange.mockClear();
+    changeNode('one');
+    expect(onNodesChange).toHaveBeenCalledTimes(1);
+
+    unmount();
+    onNodesChange.mockClear();
+    const serialize = jest.spyOn(store.query, 'serialize');
+    changeNode('two');
+
+    expect(serialize).not.toHaveBeenCalled();
+    expect(onNodesChange).not.toHaveBeenCalled();
+  });
+});
 
 /**
  * Grabs the store handles out of the Editor context so the test can dispatch
@@ -236,7 +384,7 @@ describe('<Editor /> onNodesChange subscription', () => {
     });
   });
 
-  it('should not subscribe at all when onNodesChange is not supplied', () => {
+  it('should skip node comparisons when onNodesChange is not supplied', () => {
     const getEditor = renderEditor();
     const editor = getEditor();
 

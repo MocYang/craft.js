@@ -10,6 +10,8 @@ const bundle = ['tslib'];
 
 const injectPackageVersion = () => {
   const pkg = require('./package.json');
+  const name = process.env.CRAFTJS_PACKAGE_NAME || pkg.name;
+  const version = process.env.CRAFTJS_PACKAGE_VERSION || pkg.version;
 
   return `
 if ( typeof window !== 'undefined' ) {
@@ -17,7 +19,7 @@ if ( typeof window !== 'undefined' ) {
     window['__CRAFTJS__'] = {};
   }
   
-  window['__CRAFTJS__']["${pkg.name}"] = "${pkg.version}";
+  window['__CRAFTJS__'][${JSON.stringify(name)}] = ${JSON.stringify(version)};
 }
   `;
 };

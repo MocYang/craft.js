@@ -3,7 +3,8 @@
   "private": true,
   "author": "Prev Wong <prevwong@gmail.com>",
   "scripts": {
-    "dev": "npx lerna run clean --stream && npx tsc --p packages/utils --skipLibCheck --emitDeclarationOnly && npx tsc --p packages/core --skipLibCheck --emitDeclarationOnly && npx lerna run start --parallel --ignore docs",
+    "pack:logic": "node scripts/prepare-logic-release.cjs && npm pack ./release/logic-craftjs",
+    "dev": "npx lerna run clean --stream && npx tsc --p packages/utils --skipLibCheck --emitDeclarationOnly && npx tsc --p packages/core --skipLibCheck --emitDeclarationOnly && npx lerna run bundle --stream --ignore site --ignore 'example-*' && npx lerna run start --parallel --ignore docs",
     "dev:site": "lerna run start --scope site",
     "dev:all": "run-p dev dev:site",
     "dev:yalc": "lerna run dev:yalc --parallel",

@@ -5,8 +5,15 @@ import React from 'react';
 import { CoreEventHandlers, CreateHandlerOptions } from './CoreEventHandlers';
 import { Positioner } from './Positioner';
 import { createShadow } from './createShadow';
+import { queueDOMRegistration } from './queueDOMRegistration';
 
-import { Indicator, NodeId, DragTarget, NodeTree } from '../interfaces';
+import {
+  Indicator,
+  NodeId,
+  DragTarget,
+  NodeTree,
+  EditOperation,
+} from '../interfaces';
 
 export type DefaultEventHandlersOptions = {
   isMultiSelectEnabled: (e: MouseEvent) => boolean;
@@ -31,51 +38,30 @@ export class DefaultEventHandlers<O = {}> extends CoreEventHandlers<
   positioner: Positioner | null = null;
   currentSelectedElementIds = [];
 
-  /**
-   * Pending DOM registrations, flushed once per microtask.
-   *
-   * `connect()` runs once per Node as it mounts. Dispatching `setDOM` for each one
-   * means mounting N nodes costs N dispatches, and every dispatch runs a full
-   * subscriber broadcast. Batching collapses that into a single dispatch.
-   *
-   * These live on the handler instance (one per store), not inside `handlers()`,
-   * because `handlers()` is re-invoked for every `createConnectorsUsage()` — a
-   * queue held in that closure would be per-hook and would never actually batch.
-   */
-  private pendingDOMUpdates: Map<NodeId, HTMLElement> = new Map();
-  private isDOMFlushScheduled = false;
-
   onDisable() {
     this.options.store.actions.clearEvents();
   }
 
-  /**
-   * Queues a Node's DOM element and schedules a single batched `setDOM` dispatch.
-   *
-   * Note the DOM is only written to the store on the next microtask, so `node.dom`
-   * is still empty within the synchronous block that called `connect()`. Every
-   * consumer of `node.dom` (Positioner, RenderEditorIndicator) reads it from an
-   * event callback, which is well past that point.
-   */
-  private scheduleDOMUpdate(id: NodeId, el: HTMLElement) {
-    this.pendingDOMUpdates.set(id, el);
+  private canEdit(id: NodeId, operation: EditOperation) {
+    return this.options.store.query.node(id).getEditAccess({
+      operation,
+      selectionSource: 'canvas',
+    }).allowed;
+  }
 
-    if (this.isDOMFlushScheduled) {
-      return;
-    }
-
-    this.isDOMFlushScheduled = true;
-
-    queueMicrotask(() => {
-      this.isDOMFlushScheduled = false;
-
-      const batch = Array.from(this.pendingDOMUpdates);
-      this.pendingDOMUpdates.clear();
-
-      if (batch.length) {
-        this.options.store.actions.setDOM(batch);
-      }
-    });
+  private canDrop(target: DragTarget, indicator: Indicator) {
+    if (!this.canEdit(indicator.placement.parent.id, 'structure')) return false;
+    return (
+      target.type === 'new' ||
+      target.nodes.every((id) => {
+        const node = this.options.store.query.node(id).get();
+        return (
+          this.canEdit(id, 'structure') &&
+          !!node &&
+          this.canEdit(node.data.parent, 'structure')
+        );
+      })
+    );
   }
 
   handlers() {
@@ -83,7 +69,7 @@ export class DefaultEventHandlers<O = {}> extends CoreEventHandlers<
 
     return {
       connect: (el: HTMLElement, id: NodeId) => {
-        this.scheduleDOMUpdate(id, el);
+        queueDOMRegistration(store, id, el);
 
         return this.reflect((connectors) => {
           connectors.select(el, id);
@@ -97,6 +83,8 @@ export class DefaultEventHandlers<O = {}> extends CoreEventHandlers<
           'mousedown',
           (e) => {
             e.craft.stopPropagation();
+
+            if (id && !this.canEdit(id, 'select')) return;
 
             let newSelectedElementIds = [];
 
@@ -142,6 +130,9 @@ export class DefaultEventHandlers<O = {}> extends CoreEventHandlers<
         const unbindOnClick = this.addCraftEventListener(el, 'click', (e) => {
           e.craft.stopPropagation();
 
+          if (!id) return;
+          if (!this.canEdit(id, 'select')) return;
+
           const { query } = store;
           const selectedElementIds = query.getEvent('selected').all();
 
@@ -174,6 +165,7 @@ export class DefaultEventHandlers<O = {}> extends CoreEventHandlers<
           'mouseover',
           (e) => {
             e.craft.stopPropagation();
+            if (id && !this.canEdit(id, 'select')) return;
             store.actions.setNodeEvent('hovered', id);
           }
         );
@@ -223,7 +215,11 @@ export class DefaultEventHandlers<O = {}> extends CoreEventHandlers<
               return;
             }
 
-            store.actions.setIndicator(indicator);
+            store.actions.setIndicator(
+              this.canDrop(this.dragTarget, indicator)
+                ? indicator
+                : { ...indicator, error: 'Edit access denied' }
+            );
           }
         );
 
@@ -269,8 +265,22 @@ export class DefaultEventHandlers<O = {}> extends CoreEventHandlers<
               } else {
                 selectedElementIds = [id];
               }
-              store.actions.setNodeEvent('selected', selectedElementIds);
             }
+
+            // Recheck the whole selection at gesture time, including locks added
+            // since connectors were attached. Never move only part of a group.
+            if (
+              selectedElementIds.some(
+                (selectedId) =>
+                  !this.canEdit(selectedId, 'structure') ||
+                  !query.node(selectedId).isDraggable()
+              )
+            ) {
+              e.preventDefault();
+              return;
+            }
+
+            store.actions.setNodeEvent('selected', selectedElementIds);
 
             actions.setNodeEvent('dragged', selectedElementIds);
 
@@ -380,7 +390,11 @@ export class DefaultEventHandlers<O = {}> extends CoreEventHandlers<
               index
             );
 
-            if (options && isFunction(options.onCreate)) {
+            if (
+              options &&
+              isFunction(options.onCreate) &&
+              store.query.node(dragTarget.tree.rootNodeId).get()
+            ) {
               options.onCreate(dragTarget.tree);
             }
           });
@@ -408,7 +422,12 @@ export class DefaultEventHandlers<O = {}> extends CoreEventHandlers<
 
     const indicator = this.positioner.getIndicator();
 
-    if (this.dragTarget && indicator && !indicator.error) {
+    if (
+      this.dragTarget &&
+      indicator &&
+      !indicator.error &&
+      this.canDrop(this.dragTarget, indicator)
+    ) {
       onDropNode(this.dragTarget, indicator);
     }
 

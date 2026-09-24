@@ -1,35 +1,88 @@
-name: Release
+name: Publish @deepctrls/craftjs
+
 on:
   push:
-    branches:
-      - main
+    branches: [main]
+    paths:
+      - scripts/logic-package.json
+      - .github/workflows/release.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-craftjs-release
+  cancel-in-progress: false
 
 jobs:
-  release:
-    name: Release
+  verify:
+    if: github.repository == 'hnldlsjzt/craft.js' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.plan.outputs.publish }}
+      version: ${{ steps.plan.outputs.version }}
+    env:
+      CYPRESS_INSTALL_BINARY: '0'
     steps:
-      - name: Checkout
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
-          fetch-depth: 0
-
-      - name: Install Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: 16
-
-      - name: Install dependencies
-        run: yarn install
-
-      - name: Create Release Pull Request or Publish to npm
-        id: changesets
-        uses: changesets/action@v1
-        with:
-          version: yarn changeset:version
-          publish: yarn publish
-          title: 'chore: release'
-          commit: 'chore: release'
+          node-version: '24'
+          registry-url: https://registry.npmjs.org/
+          package-manager-cache: false
+      - name: Use an OIDC-capable npm CLI
+        run: npm install --global npm@11.20.0
+      - name: Check release version
+        id: plan
+        run: node scripts/check-logic-release.cjs
+      - name: Install locked dependencies
+        run: node .yarn/releases/yarn-3.6.3.cjs install --immutable --mode=skip-build
+      - name: Test
+        run: |
+          node --test scripts/check-logic-release.test.cjs
+          node .yarn/releases/yarn-3.6.3.cjs test --runInBand
+      - name: Build the fork package
+        run: node scripts/prepare-logic-release.cjs
+      - name: Build layers for workspace lint resolution
+        working-directory: packages/layers
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_ENV: production
+        run: |
+          node ../../node_modules/typescript/bin/tsc --skipLibCheck --emitDeclarationOnly --incremental false
+          node ../../node_modules/rollup/dist/bin/rollup -c rollup.config.js
+      - name: Lint
+        run: npm run lint
+      - name: Pack and verify independent consumers
+        env:
+          PACKAGE_VERSION: ${{ steps.plan.outputs.version }}
+        run: |
+          npm pack ./release/logic-craftjs --pack-destination release
+          node scripts/verify-logic-package.cjs "release/deepctrls-craftjs-${PACKAGE_VERSION}.tgz" 18.3.1
+          node scripts/verify-logic-package.cjs "release/deepctrls-craftjs-${PACKAGE_VERSION}.tgz" 19.0.0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: craftjs-package
+          path: release/deepctrls-craftjs-*.tgz
+          if-no-files-found: error
+
+  publish:
+    needs: verify
+    if: needs.verify.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: https://registry.npmjs.org/
+          package-manager-cache: false
+      - run: npm install --global npm@11.20.0
+      - uses: actions/download-artifact@v4
+        with:
+          name: craftjs-package
+          path: package
+      - name: Publish verified tarball using OIDC
+        run: npm publish ./package/*.tgz --access public --provenance --registry=https://registry.npmjs.org/

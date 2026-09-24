@@ -65,7 +65,10 @@ export function Element<T extends React.ElementType>({
 
       const tree = query.parseReactElement(linkedElement).toNodeTree();
 
-      actions.history.ignore().addLinkedNodeFromTree(tree, nodeId, id);
+      // Component-owned linked nodes are document initialization, not a user drop.
+      actions.history.ignore().transact({ source: 'document-load' }, (tx) => {
+        tx.addLinkedNodeFromTree(tree, nodeId, id);
+      });
       return tree.rootNodeId;
     }
     return null;

@@ -3,7 +3,7 @@ import * as React from 'react';
 import invariant from 'tiny-invariant';
 
 import { EditorContext } from './EditorContext';
-import { useEditorStore } from './store';
+import { editorInitialState, useEditorStore } from './store';
 
 import { Events } from '../events';
 import { Options } from '../interfaces';
@@ -75,16 +75,20 @@ export const Editor = ({ children, ...options }: EditorProps) => {
         let actionType = actionPerformed.type;
 
         if (
-          [HISTORY_ACTIONS.IGNORE, HISTORY_ACTIONS.THROTTLE].includes(
-            actionType
-          ) &&
+          [
+            HISTORY_ACTIONS.IGNORE,
+            HISTORY_ACTIONS.MERGE,
+            HISTORY_ACTIONS.THROTTLE,
+          ].includes(actionType) &&
           actionPerformed.params
         ) {
           actionPerformed.type = actionPerformed.params[0];
         }
 
         if (
-          ['setState', 'deserialize'].includes(actionPerformed.type) ||
+          ['setState', 'deserialize', 'transact'].includes(
+            actionPerformed.type
+          ) ||
           isModifyingNodeData
         ) {
           normalizer((draft) => {
@@ -130,11 +134,10 @@ export const Editor = ({ children, ...options }: EditorProps) => {
    * most of the cost of a single click.
    *
    * Changes:
-   * 1. Skip the subscription entirely when the consumer didn't pass `onNodesChange`.
+   * 1. Skip node comparisons while no callback is configured.
    * 2. Never serialize inside the collector. Consumers that need the JSON call
    *    `query.serialize()` themselves inside the callback, where they can debounce it.
-   * 3. Keep the original contract: only notify when the serialized output *could*
-   *    have changed. `serialize()` reads nothing but the set of node ids, each
+   * 3. Notify only when serialized output *could* change. `serialize()` reads node ids, each
    *    `node.data` and `options.resolver` (see NodeHelpers.toSerializedNode), and
    *    every write goes through Immer, so comparing those references is exact.
    *    hover / select / setDOM / setIndicator leave them untouched and are skipped.
@@ -145,19 +148,24 @@ export const Editor = ({ children, ...options }: EditorProps) => {
    *    consumer's debounced callback instead of removing it.
    */
   React.useEffect(() => {
-    if (optionsRef.current.onNodesChange === undefined) {
-      return;
-    }
-
     let version = 0;
-    // null forces the very first notify to count as a change, same as before
-    let prevNodes: Record<string, any> | null = null;
-    let prevResolver: any = null;
+    let prevNodes = context.query.getNodes();
+    let prevResolver = context.query.getOptions().resolver;
 
     return context.subscribe(
       (state) => {
         const { nodes } = state;
         const resolver = state.options.resolver;
+        const callback = state.options.onNodesChange;
+
+        if (
+          !callback ||
+          callback === editorInitialState.options.onNodesChange
+        ) {
+          prevNodes = nodes;
+          prevResolver = resolver;
+          return { version };
+        }
 
         // nodes 引用没变（如 setIndicator / setOptions）直接跳过，省掉 O(n) 比较
         const changed =
@@ -173,11 +181,27 @@ export const Editor = ({ children, ...options }: EditorProps) => {
 
         return { version };
       },
-      () => {
-        context.query.getOptions().onNodesChange(context.query);
-      }
+      () => context.query.getOptions().onNodesChange(context.query),
+      false,
+      { initialCollected: { version } }
     );
   }, [context]);
+
+  React.useEffect(() => {
+    if (!context) return;
+    const current = context.query.getOptions();
+    const changePolicy =
+      options.editAccess !== undefined &&
+      current.editAccess !== options.editAccess;
+    const changeCallback =
+      options.onEditDenied !== undefined &&
+      current.onEditDenied !== options.onEditDenied;
+    if (!changePolicy && !changeCallback) return;
+    context.actions.setOptions((editorOptions) => {
+      if (changePolicy) editorOptions.editAccess = options.editAccess;
+      if (changeCallback) editorOptions.onEditDenied = options.onEditDenied;
+    });
+  }, [context, options.editAccess, options.onEditDenied]);
 
   if (!context) {
     return null;
