@@ -5,6 +5,7 @@ import React from 'react';
 import { CoreEventHandlers, CreateHandlerOptions } from './CoreEventHandlers';
 import { Positioner } from './Positioner';
 import { createShadow } from './createShadow';
+import { queueDOMRegistration } from './queueDOMRegistration';
 
 import {
   Indicator,
@@ -68,7 +69,7 @@ export class DefaultEventHandlers<O = {}> extends CoreEventHandlers<
 
     return {
       connect: (el: HTMLElement, id: NodeId) => {
-        store.actions.setDOM(id, el);
+        queueDOMRegistration(store, id, el);
 
         return this.reflect((connectors) => {
           connectors.select(el, id);

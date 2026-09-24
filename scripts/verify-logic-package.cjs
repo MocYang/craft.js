@@ -24,15 +24,27 @@ async function verifyRuntime(core, consumerRequire) {
   document.body.appendChild(container);
   const root = createRoot(container);
   const denied = [];
+  let notifications = 0;
   let store;
   function Harness() {
-    store = core.useEditorStore(
-      { editAccess: true, onEditDenied: (event) => denied.push(event) },
-      () => {}
-    );
+    store = core.useEditor().store;
     return null;
   }
-  await act(() => root.render(React.createElement(Harness)));
+  await act(() =>
+    root.render(
+      React.createElement(
+        core.Editor,
+        {
+          editAccess: true,
+          onEditDenied: (event) => denied.push(event),
+          onNodesChange: () => {
+            notifications++;
+          },
+        },
+        React.createElement(Harness)
+      )
+    )
+  );
   try {
     const nodes = {};
     for (const id of ['ROOT', 'child']) {
@@ -56,6 +68,54 @@ async function verifyRuntime(core, consumerRequire) {
       });
       store.actions.history.clear();
     });
+    const serialize = store.query.serialize;
+    let serializationCalls = 0;
+    store.query.serialize = () => {
+      serializationCalls++;
+      return serialize();
+    };
+    const setDOM = store.actions.setDOM;
+    let domWrites = 0;
+    store.actions.setDOM = (...args) => {
+      domWrites++;
+      setDOM(...args);
+    };
+    const beforeNotifications = notifications;
+    const handler = new core.DefaultEventHandlers({
+      store,
+      isMultiSelectEnabled: () => false,
+      removeHoverOnMouseleave: false,
+    });
+    const firstDOM = document.createElement('div');
+    const lastDOM = document.createElement('div');
+    let cleanups;
+    await act(async () => {
+      cleanups = [
+        handler.handlers().connect(firstDOM, 'child'),
+        handler.handlers().connect(lastDOM, 'child'),
+      ];
+      assert.equal(domWrites, 0, 'Connectors defer writes to one microtask');
+    });
+    cleanups.forEach((cleanup) => cleanup());
+    assert.equal(
+      domWrites,
+      1,
+      'The published connector must batch DOM registrations'
+    );
+    assert.equal(store.query.node('child').get().dom, lastDOM);
+    assert.equal(
+      notifications,
+      beforeNotifications + 1,
+      'DOM batches notify onNodesChange'
+    );
+    assert.equal(
+      serializationCalls,
+      0,
+      'Notifications must not serialize the document'
+    );
+    assert.equal(store.history.timeline.length, 0);
+    store.query.serialize = serialize;
+    store.actions.setDOM = setDOM;
     await act(() =>
       store.actions.setProp('child', (props) => {
         props.style.color = 'red';
@@ -212,6 +272,10 @@ const policy: EditAccessPolicy = { isGeometryProp: (path) => path[0] === 'positi
 const options: Partial<Options> = { editAccess: policy, onEditDenied: (event: EditDenied) => { event.action.type; } };
 declare const store: EditorStore;
 store.actions.setEditorLock('child', 'position');
+store.actions.setDOM('child', document.createElement('div'));
+store.actions.setDOM([['child', document.createElement('div')]]);
+// @ts-expect-error Single-node DOM registration requires the DOM argument.
+store.actions.setDOM('child');
 store.actions.transact({ source: 'user-edit' }, actions => actions.setProp('child', props => { props.label = 'updated'; }));
 store.query.node('child').getEditAccess({ operation: 'geometry' }).allowed;
 void options;

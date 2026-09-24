@@ -38,6 +38,28 @@ because their React contexts would be separate.
 - Live canvas selection/drag/drop checks, including locks changed during a drag.
 - Explicit document-load and application-authorized runtime update contexts.
 - Local utility runtime and declarations are included in the release tarball.
+- Port all three Designer `@craftjs/core@0.2.12` patch changes to maintained source:
+  microtask DOM batching, batch `setDOM`, and serialization-free notifications.
+
+## Designer patch compatibility
+
+Connector DOM registrations are collected per editor store and flushed in one
+`queueMicrotask`. For duplicate node IDs, the last DOM wins. Missing/deleted nodes
+are skipped. Internal `store.actions.setDOM(id, dom)` remains synchronous and
+also accepts `store.actions.setDOM([[id, dom], ...])`. Neither form adds history.
+Code reading a newly connected node's DOM must allow the microtask to flush.
+
+`onNodesChange` now follows the Designer patch: each store notification invokes
+the current configured callback, including DOM, selection and option updates.
+The framework does **not** serialize the tree or compare document contents first.
+Rejected edits do not notify. This differs from upstream and fork 0.2.13, where
+the serialized document was compared when a callback was present. Callers that
+need persistence-only notifications must decide when to save; avoid unconditional
+store writes inside this callback, which can recursively notify again.
+
+Dynamic callback changes through `setOptions`, unmount cleanup and StrictMode
+cleanup from the fork are retained. These patch changes apply independently of
+the optional editing-access feature below.
 
 ## Editing access
 

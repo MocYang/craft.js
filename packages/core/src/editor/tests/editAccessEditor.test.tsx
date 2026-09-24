@@ -32,7 +32,7 @@ function Panel({ label, showExtra = false, style }: PanelProps) {
 
 const resolver = { Panel };
 
-function mountEditor(options: Partial<Options> = {}, data?: string) {
+async function mountEditor(options: Partial<Options> = {}, data?: string) {
   let store: EditorStore;
   const CaptureStore = () => {
     store = useContext(EditorContext);
@@ -54,6 +54,9 @@ function mountEditor(options: Partial<Options> = {}, data?: string) {
     </Editor>
   );
   const mounted = render(scene(options));
+  await act(async () => {
+    await Promise.resolve();
+  });
   const panelId = Object.values(store.query.getNodes()).find(
     (node) => node.data.type === Panel
   ).id;
@@ -85,9 +88,9 @@ describe('edit access in the mounted Editor', () => {
     ).toEqual([]);
   });
 
-  it('initializes locked Frame JSX and component-owned linked nodes without history', () => {
+  it('initializes locked Frame JSX and component-owned linked nodes without history', async () => {
     const onEditDenied = jest.fn();
-    const { store, panelId, getByTestId } = mountEditor({ onEditDenied });
+    const { store, panelId, getByTestId } = await mountEditor({ onEditDenied });
     const panel = store.query.node(panelId).get();
     const linkedId = panel.data.linkedNodes.content;
 
@@ -101,12 +104,12 @@ describe('edit access in the mounted Editor', () => {
     expect(onEditDenied).not.toHaveBeenCalled();
   });
 
-  it('loads serialized locks and linked nodes through Frame while editing is disabled', () => {
-    const original = mountEditor();
+  it('loads serialized locks and linked nodes through Frame while editing is disabled', async () => {
+    const original = await mountEditor();
     const data = original.store.query.serialize();
     original.unmount();
     const onEditDenied = jest.fn();
-    const { store, panelId, getByTestId } = mountEditor(
+    const { store, panelId, getByTestId } = await mountEditor(
       { enabled: false, onEditDenied },
       data
     );
@@ -121,8 +124,8 @@ describe('edit access in the mounted Editor', () => {
     expect(onEditDenied).not.toHaveBeenCalled();
   });
 
-  it('applies updated editAccess props without remounting the document', () => {
-    const { store, panelId, rerenderOptions } = mountEditor({
+  it('applies updated editAccess props without remounting the document', async () => {
+    const { store, panelId, rerenderOptions } = await mountEditor({
       editAccess: false,
     });
     act(() =>
@@ -160,17 +163,17 @@ describe('edit access in the mounted Editor', () => {
     expect(Object.keys(store.query.getNodes())).toHaveLength(3);
   });
 
-  it('initializes a dynamically rendered Element beneath an all-locked component', () => {
+  it('initializes a dynamically rendered Element beneath an all-locked component', async () => {
     const onEditDenied = jest.fn();
-    const { store, panelId, getByTestId } = mountEditor({ onEditDenied });
+    const { store, panelId, getByTestId } = await mountEditor({ onEditDenied });
     act(() => store.actions.setEditorLock(panelId, 'all'));
-    act(() =>
+    await act(async () => {
       store.actions.transact({ source: 'document-load' }, (actions) => {
         actions.setProp(panelId, (props) => {
           props.showExtra = true;
         });
-      })
-    );
+      });
+    });
 
     const extraId = store.query.node(panelId).get().data.linkedNodes.extra;
     expect(store.query.node(extraId).get().data.parent).toBe(panelId);
@@ -183,7 +186,7 @@ describe('edit access in the mounted Editor', () => {
 
   it.each(['setProp', 'merged-transaction'])(
     'rejects normalized geometry as one change without notifying onNodesChange: %s',
-    (entry) => {
+    async (entry) => {
       const onNodesChange = jest.fn();
       const onEditDenied = jest.fn();
       const normalizeNodes = jest.fn<
@@ -197,7 +200,7 @@ describe('edit access in the mounted Editor', () => {
           panel.data.props.style.width = 999;
         }
       });
-      const { store, panelId } = mountEditor({
+      const { store, panelId } = await mountEditor({
         onNodesChange,
         onEditDenied,
         normalizeNodes,

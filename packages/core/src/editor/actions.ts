@@ -383,12 +383,18 @@ const Methods = (
     },
 
     /**
-     * Given a `id`, it will set the `dom` porperty of that node.
-     *
-     * @param id of the node we want to set
-     * @param dom
+     * Register one DOM synchronously, or a batch collected by connectors.
+     * Nodes removed before a deferred batch is flushed are safely skipped.
      */
-    setDOM(id: NodeId, dom: HTMLElement) {
+    setDOM(...args: [NodeId, HTMLElement] | [[NodeId, HTMLElement][]]) {
+      if (Array.isArray(args[0])) {
+        args[0].forEach(([id, dom]) => {
+          if (state.nodes[id]) state.nodes[id].dom = dom;
+        });
+        return;
+      }
+
+      const [id, dom] = args;
       if (!state.nodes[id]) {
         return;
       }

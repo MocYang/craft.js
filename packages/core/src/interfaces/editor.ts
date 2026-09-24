@@ -18,6 +18,7 @@ export type Options = {
     newParentNode: Node,
     existingParentNode: Node
   ) => void;
+  /** Called on store notifications, including DOM/events; does not serialize or diff nodes. */
   onNodesChange: (query: QueryCallbacksFor<typeof QueryMethods>) => void;
   resolver: Resolver;
   enabled: boolean;

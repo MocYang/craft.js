@@ -116,16 +116,17 @@ export const Editor = ({ children, ...options }: EditorProps) => {
       return;
     }
 
-    // Read current store options so setOptions can enable notifications later.
-    // The default no-op callback does not need full-tree serialization.
+    // Preserve the Designer patch's per-notification semantics without serializing
+    // the whole tree. Read current options to support dynamically added callbacks.
+    let revision = 0;
     return context.subscribe(
       (state) => ({
-        json:
+        revision:
           state.options.onNodesChange &&
           state.options.onNodesChange !==
             editorInitialState.options.onNodesChange
-            ? context.query.serialize()
-            : null,
+            ? ++revision
+            : revision,
       }),
       () => {
         const { onNodesChange } = context.query.getOptions();
