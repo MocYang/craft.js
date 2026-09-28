@@ -248,17 +248,10 @@ dependencies continue to resolve. The release process builds the utilities and
 core, then stages the renamed core package with CommonJS, ES modules, and
 TypeScript declarations in `release/logic-craftjs`.
 
-From a checkout with its development dependencies installed:
-
-```sh
-yarn test --runInBand
-yarn pack:logic
-npm publish ./release/logic-craftjs --access public --registry=https://registry.npmjs.org/
-```
-
+For the version preflight, build, exact-tarball verification, manual publish and
+consumer-update checklist, follow the [manual release guide](https://github.com/hnldlsjzt/craft.js/blob/main/docs/manual-release.md).
 Release metadata and the fork version are maintained in
-`scripts/logic-package.json`. Publishing requires npm access to the `@deepctrls`
-scope and completion of npm's authentication requirements.
+`scripts/logic-package.json`.
 
 ## Documentation and license
 

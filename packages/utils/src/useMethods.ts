@@ -30,7 +30,7 @@ export type StatePath = ReadonlyArray<string | number>;
 export type SubscribeOptions = {
   /**
    * Paths read by the collector. Omitting this keeps the legacy global
-   * subscription behavior.
+   * subscription behavior. '*' matches one path segment.
    */
   dependencies?: ReadonlyArray<StatePath>;
   /**
@@ -631,16 +631,23 @@ class Watcher<S> {
     const subscribers = new Set(this.globalSubscribers);
 
     patches.forEach(({ path }) => {
-      let node = this.root;
-      node.exact.forEach((subscriber) => subscribers.add(subscriber));
-
+      let nodes = [this.root];
       for (const segment of path as StatePath) {
-        node = node.children.get(segment);
-        if (!node) return;
-        node.exact.forEach((subscriber) => subscribers.add(subscriber));
+        const next: SubscriptionPathNode[] = [];
+        nodes.forEach((node) => {
+          node.exact.forEach((subscriber) => subscribers.add(subscriber));
+          const direct = node.children.get(segment);
+          const wildcard = node.children.get('*');
+          if (direct) next.push(direct);
+          if (wildcard && wildcard !== direct) next.push(wildcard);
+        });
+        nodes = next;
+        if (!nodes.length) return;
       }
 
-      node.subtree.forEach((subscriber) => subscribers.add(subscriber));
+      nodes.forEach((node) =>
+        node.subtree.forEach((subscriber) => subscribers.add(subscriber))
+      );
     });
 
     return subscribers;

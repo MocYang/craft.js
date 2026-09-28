@@ -348,6 +348,12 @@ const subscriptionMethods = (state) => ({
   setNodeValue(id, value) {
     state.nodes[id].data.props.value = value;
   },
+  setNodeHovered(id, hovered) {
+    state.nodes[id].events.hovered = hovered;
+  },
+  setNodeLock(id, lock) {
+    state.nodes[id].data.custom.editorLock = lock;
+  },
 });
 
 describe('useMethods subscriptions', () => {
@@ -399,6 +405,34 @@ describe('useMethods subscriptions', () => {
     expect(nodes).toHaveBeenCalledTimes(1);
     expect(selected).not.toHaveBeenCalled();
     expect(legacy).toHaveBeenCalledTimes(1);
+  });
+
+  it('matches a wildcard lock path without notifying on events or props', () => {
+    const { result } = renderHook(() =>
+      useMethods(subscriptionMethods, {
+        nodes: {
+          a: {
+            data: { props: { value: 1 }, custom: { editorLock: '' } },
+            events: { hovered: false },
+          },
+          b: {
+            data: { props: { value: 1 }, custom: { editorLock: '' } },
+            events: { hovered: false },
+          },
+        },
+      })
+    );
+    const changed = jest.fn();
+    result.current.subscribe((state) => state.nodes, changed, false, {
+      dependencies: [['nodes', '*', 'data', 'custom', 'editorLock']],
+    });
+
+    act(() => result.current.actions.setNodeHovered('a', true));
+    expect(changed).not.toHaveBeenCalled();
+    act(() => result.current.actions.setNodeValue('b', 2));
+    expect(changed).not.toHaveBeenCalled();
+    act(() => result.current.actions.setNodeLock('b', 'all'));
+    expect(changed).toHaveBeenCalledTimes(1);
   });
 
   it('does not fire onChange on the first notify when seeded with initialCollected', () => {
