@@ -7,6 +7,15 @@ export type NodeContextType = {
   related?: boolean;
 };
 
+export type NodeElementProps = {
+  id: NodeId;
+  render?: React.ReactElement;
+};
+
+export const NodeElementContext = React.createContext<
+  React.ComponentType<NodeElementProps>
+>(null);
+
 export const NodeContext = React.createContext<NodeContextType>(null);
 
 export type NodeProviderProps = Omit<NodeContextType, 'connectors'> & {
