@@ -18,7 +18,7 @@
     "react-dom": "19.0.0"
   },
   "scripts": {
-    "start": "next dev -p 3002",
+    "start": "next dev -p 4002",
     "build": "next build",
     "clean": "rimraf lib .next out dist"
   },

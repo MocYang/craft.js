@@ -21,7 +21,7 @@ function Home() {
         src={
           process.env.NODE_ENV === 'production'
             ? '/examples/landing'
-            : 'http://localhost:3001'
+            : 'http://localhost:4001'
         }
       />
     </Layout>
