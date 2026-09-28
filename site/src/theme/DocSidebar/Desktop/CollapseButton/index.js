@@ -1,9 +1,9 @@
 import React from 'react';
 import clsx from 'clsx';
-import {translate} from '@docusaurus/Translate';
+import { translate } from '@docusaurus/Translate';
 import IconArrow from '@theme/Icon/Arrow';
 import styles from './styles.module.css';
-export default function CollapseButton({onClick}) {
+export default function CollapseButton({ onClick }) {
   return (
     <button
       type="button"
@@ -19,9 +19,10 @@ export default function CollapseButton({onClick}) {
       })}
       className={clsx(
         'button button--secondary button--outline',
-        styles.collapseSidebarButton,
+        styles.collapseSidebarButton
       )}
-      onClick={onClick}>
+      onClick={onClick}
+    >
       <IconArrow className={styles.collapseSidebarButtonIcon} />
     </button>
   );
