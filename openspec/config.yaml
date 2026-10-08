@@ -1,0 +1,22 @@
+schema: spec-driven
+context: |
+  本仓库是 Craft.js 的 React 拖放编辑器 monorepo/fork，使用 Yarn 3.6.3 workspaces，包含 packages、site 和 examples。
+
+  DeepCtrls 对外发布的包是 @deepctrls/craftjs，不是根目录 Changesets 发布的上游多包集合。该 fork 包的唯一版本来源是 scripts/logic-package.json；scripts/prepare-logic-release.cjs 从 packages/core 和 packages/utils 生成 release/logic-craftjs。release/logic-craftjs 是生成目录，不应手工编辑；不要通过修改 packages/core/package.json 来 bump fork 版本。
+
+  .github/workflows/release.yml 是该 fork 包的发布入口：目标仓库为 hnldlsjzt/craft.js，分支为 main；发布前检查 npm 版本、测试、构建、lint、打包并验证 React 18/19 消费者，然后以 OIDC 发布验证过的 tarball，并创建 v<version> Git tag 和 GitHub Release。npm 版本检查只允许在 registry 明确返回 404 时发布；查询错误必须失败关闭。npm 发布 job 使用 id-token: write，GitHub 发布记录 job 单独使用 contents: write。
+
+  常用验证入口：根目录 yarn test、npm run lint、yarn build。fork 包的完整发布验证以 .github/workflows/release.yml 和 docs/manual-release.md 中的步骤为准。发布记录保存在 docs/releases/<version>-validation.md；包内 README 来源是 scripts/logic-package.README.md。
+rules:
+  proposal:
+    - 用中文描述需求和影响，保留 OpenSpec 标准章节名及稳定的包名、脚本名、路径名。
+    - 明确区分 @deepctrls/craftjs fork 发包与根目录 Changesets 上游多包发布，不要混为一条流程。
+  specs:
+    - 只写可观察行为和失败条件；规范要求使用 MUST 或 SHALL，每个 Requirement 至少包含一个 #### Scenario，并使用 WHEN/THEN。
+    - 发布规则必须区分同一 workflow run 的恢复与新 run 遇到已存在版本；不得把 registry 已有版本当成本次提交的证明。
+  design:
+    - 优先复用现有发布脚本、workflow 和已验证的 tarball；凭据按 job 最小授权，优先使用 OIDC，不新增长期 npm token。
+    - 发布 tag 和 GitHub Release 必须绑定触发提交；遇到目标不匹配时停止，不覆盖或移动已有发布记录。
+  tasks:
+    - 每项任务都要给出具体验证命令或可检查结果，使用仓库锁定的 Yarn 版本和现有依赖。
+    - 将仓库代码变更与需要在 GitHub/npm 页面手工完成的设置分开列出，不要把外部设置描述成代码已自动完成。

@@ -5,8 +5,20 @@ on:
     branches: [main]
     paths:
       - scripts/logic-package.json
-      - .github/workflows/release.yml
   workflow_dispatch:
+    inputs:
+      release_mode:
+        description: Choose a real release or a non-public Trusted Publisher stage test.
+        required: true
+        type: choice
+        options:
+          - publish
+          - stage
+        default: publish
+      stage_version:
+        description: Required for stage mode; use an unpublished stable x.y.z version.
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -22,8 +34,11 @@ jobs:
     outputs:
       publish: ${{ steps.plan.outputs.publish }}
       version: ${{ steps.plan.outputs.version }}
+      mode: ${{ steps.plan.outputs.mode }}
     env:
       CYPRESS_INSTALL_BINARY: '0'
+      RELEASE_MODE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.release_mode == 'stage' && 'stage' || 'publish' }}
+      RELEASE_VERSION: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.release_mode == 'stage' && github.event.inputs.stage_version || '' }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -85,4 +100,94 @@ jobs:
           name: craftjs-package
           path: package
       - name: Publish verified tarball using OIDC
-        run: npm publish ./package/*.tgz --access public --provenance --registry=https://registry.npmjs.org/
+        env:
+          RELEASE_MODE: ${{ needs.verify.outputs.mode }}
+        run: |
+          if [ "$RELEASE_MODE" = "stage" ]; then
+            npm stage publish ./package/*.tgz --access public --provenance --registry=https://registry.npmjs.org/
+          else
+            npm publish ./package/*.tgz --access public --provenance --registry=https://registry.npmjs.org/
+          fi
+
+  github_release:
+    needs: [verify, publish]
+    if: needs.verify.outputs.mode == 'publish' && needs.publish.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      RELEASE_VERSION: ${{ needs.verify.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: https://registry.npmjs.org/
+          package-manager-cache: false
+      - name: Confirm the published npm version
+        run: |
+          published_version="$(npm view "@deepctrls/craftjs@${RELEASE_VERSION}" version --registry=https://registry.npmjs.org/)"
+          if [ "$published_version" != "$RELEASE_VERSION" ]; then
+            echo "::error::npm returned version '$published_version'; expected '$RELEASE_VERSION'."
+            exit 1
+          fi
+      - name: Create or verify the Git tag and GitHub Release
+        run: |
+          set -euo pipefail
+          tag="v${RELEASE_VERSION}"
+          release_response="$(mktemp)"
+          trap 'rm -f "$release_response"' EXIT
+          release_status="$(curl --silent --show-error --output "$release_response" --write-out '%{http_code}' \
+            --header 'Accept: application/vnd.github+json' \
+            --header "Authorization: Bearer ${GH_TOKEN}" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${tag}")"
+
+          case "$release_status" in
+            200)
+              release_tag="$(jq -r '.tag_name // empty' "$release_response")"
+              if [ "$release_tag" != "$tag" ]; then
+                echo "::error::Release lookup for '$tag' returned unexpected tag '$release_tag'."
+                exit 1
+              fi
+              if [ "$(jq -r '.draft or .prerelease' "$release_response")" = "true" ]; then
+                echo "::error::Release '$tag' exists as a draft or prerelease; manual review is required."
+                exit 1
+              fi
+              release_exists=true
+              ;;
+            404) release_exists=false ;;
+            *)
+              cat "$release_response"
+              echo "::error::GitHub Release lookup failed with HTTP $release_status."
+              exit 1
+              ;;
+          esac
+
+          remote_tag="$(git ls-remote --tags origin "refs/tags/${tag}" "refs/tags/${tag}^{}")"
+          if [ -n "$remote_tag" ]; then
+            git fetch --no-tags origin "refs/tags/${tag}:refs/tags/${tag}"
+            tag_commit="$(git rev-parse "${tag}^{commit}")"
+            if [ "$tag_commit" != "$GITHUB_SHA" ]; then
+              echo "::error::Tag '$tag' points to '$tag_commit', not '$GITHUB_SHA'."
+              exit 1
+            fi
+          elif [ "$release_exists" = "true" ]; then
+            echo "::error::Release '$tag' exists but its tag is missing; refusing to infer its target commit."
+            exit 1
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$tag" "$GITHUB_SHA" -m "Release ${RELEASE_VERSION}"
+            git push origin "refs/tags/${tag}"
+          fi
+
+          if [ "$release_exists" = "false" ]; then
+            gh release create "$tag" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$tag" \
+              --generate-notes \
+              --verify-tag
+          fi

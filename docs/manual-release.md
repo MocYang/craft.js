@@ -1,57 +1,99 @@
-# 手动发布 `@deepctrls/craftjs`
+# 发布 `@deepctrls/craftjs`
 
-本文只说明本地手动发布流程，不执行发布。命令在 Windows PowerShell 下从仓库根目录运行。
+本文说明如何准备版本并通过 GitHub Actions 发布到 npm。自动发布目标是 `hnldlsjzt/craft.js:main`；发布包名、版本唯一来源为 `scripts/logic-package.json`。根目录 Changesets 发布流程不适用于此包。
 
-## 发布对象与版本
+## 首次配置
 
-- npm 发布对象只有 `@deepctrls/craftjs`。根目录是保留上游 workspace 结构的 monorepo，发布目录由 `scripts/prepare-logic-release.cjs` 生成。
-- 发布包名和版本以 `scripts/logic-package.json` 为准。不要改 `packages/core/package.json` 的上游 workspace 版本；`@craftjs/utils` 会作为内部依赖打进 Core 包，不需要为内部改动单独发包。
-- `scripts/logic-package.README.md` 会成为 tarball 内的 `README.md`。发布前更新本次变更和安装示例。
-- `.github/workflows/release.yml` 会在 `main` 上 `scripts/logic-package.json` 改动时自动启动，也支持 Actions 手动运行。它先验证，再发布已经验证的同一个 tarball。手动发包后再推送版本变更时，workflow 会识别版本已存在并跳过重复发布。
+此 fork 的 Actions 初始为未启用状态。仓库维护者先打开 [GitHub Actions](https://github.com/hnldlsjzt/craft.js/actions)，审阅页面列出的 workflow 后，按页面提示启用 fork workflows。确认左侧可见且启用了 `Publish @deepctrls/craftjs`；此时不要手动 dispatch 发布 workflow。
 
-## 1. 准备版本
+然后在 npm 网站进入 Packages → `@deepctrls/craftjs` → Settings → Trusted publishing，添加 GitHub Actions publisher：
 
-先把要发布的源码和测试整理到可审阅的提交，确认工作区没有不相关改动。发布记录使用该源码提交号。
+- Organization or user：`hnldlsjzt`
+- Repository：`craft.js`
+- Workflow filename：`release.yml`（只填文件名，不带 `.github/workflows/`）
+- Environment name：留空
+- 在 Allowed actions 中允许直接 `npm publish`，以保留正式发布路径。npm 默认允许 `npm stage publish`，该命令无需单独勾选。
 
-截至 2026-09-28，仓库元数据是 `0.2.15`，版本预检确认它已存在于 npm，不能重发。下一次 patch 版本应先运行 `yarn version:logic:patch`，得到 `0.2.16` 后重新预检；实际发布当天仍以 registry 检查结果为准。
+保存后确认 publisher 列表中的仓库、workflow 和 `npm publish` 权限均正确。stage 验证走 npm 默认允许的 `npm stage publish`。仓库 workflow 只在 npm 发布 job 使用 OIDC (`id-token: write`)；GitHub tag/Release job 使用其单独的 `contents: write` 权限。
 
-检查 `scripts/logic-package.json` 当前版本：
+## 日常发布
+
+### 1. 评审并准备版本
+
+先将待发布功能和修复正常评审并合入目标仓库 `hnldlsjzt/craft.js:main`，记录该源码提交 SHA。发布版本提交必须基于目标仓库 main。
+
+选择新的稳定版本：
+
+- patch：在仓库根目录运行 `yarn version:logic:patch`。
+- minor/major：将 `scripts/logic-package.json` 的 `version` 改为新的稳定 `x.y.z`。
+
+更新 `scripts/logic-package.README.md` 的变更摘要和包说明。不要通过修改 `packages/core/package.json` 来修改 fork 包版本，也不要手工编辑生成目录 `release/logic-craftjs`。
+
+### 2. 运行版本预检
+
+在仓库根目录运行：
 
 ```powershell
-Get-Content scripts/logic-package.json
 node scripts/check-logic-release.cjs
 ```
 
-发布新的 patch 版本时运行：
+- registry 明确返回版本不存在：可以提交版本元数据和 README 变更，并 push 到 `hnldlsjzt/craft.js:main`。
+- 版本已存在：停止，不得重复发布该版本；选择新版本并重新预检。workflow 对已存在版本仍执行验证，但会跳过 npm 发布、tag 和 Release。
+- 网络、认证或 registry 查询出现其它错误：停止并排查。不能将查询失败当作版本不存在。
+
+### 3. 推送发布提交并等待 workflow
+
+将 `scripts/logic-package.json` 和 `scripts/logic-package.README.md` 的变更提交并推送至 `hnldlsjzt/craft.js:main`。只修改 workflow 等其它文件不会自动触发发布。push 会启动 `Publish @deepctrls/craftjs`：workflow 安装锁定依赖，运行测试、构建、lint、打包及 React 18.3.1 / 19.0.0 独立消费者验证；只有这些步骤成功且版本预检确认版本不存在时，才会用 OIDC 发布验证过的同一个 tarball。
+
+如确有需要，可在仓库 Actions 页面手动运行 `Publish @deepctrls/craftjs`，但只能选择 `main`，并且它会执行完整的同一发布流程。手动 dispatch 不会绕过版本预检或验证。
+
+在 Actions 中找到与本次 push 对应的 run，确认分支为 `main`、提交 SHA 与发布提交一致，并等待整体结果成功。只在 run 失败时打开失败 job 日志定位原因；验证任一步失败都会阻断 npm 发布。若版本预检报告已存在，确认该 run 只验证并跳过 npm 发布及 GitHub 记录创建，不要把旧版本关联到当前提交。
+
+成功后核对 registry 和 GitHub Release：
 
 ```powershell
-yarn version:logic:patch
+npm view "@deepctrls/craftjs@<version>" version --registry=https://registry.npmjs.org/
 ```
 
-该命令只把 `scripts/logic-package.json` 的 `x.y.z` patch 位加一。发布 minor/major 版本时，手动只改这个文件中的 `version`，保持稳定版 `x.y.z` 格式。然后再运行 `node scripts/check-logic-release.cjs`：
+输出应与本次版本一致。打开 GitHub Releases，确认 `v<version>` 指向本次源码提交，且 Release 说明由 GitHub 生成。
 
-- registry 返回 404：该版本尚不存在，可以继续验证。
-- registry 返回 200：该版本已发布，不能覆盖；停止发布，选择一个新版本。workflow 对已存在版本只跑验证并跳过发布。
-- 网络、认证或 registry 返回其它错误：停止操作。脚本会 fail closed，不能把查询失败当作版本不存在。
+### 4. 归档发布记录
 
-查看版本对应的现有发布记录也可用：
+以 `docs/releases/0.2.14-validation.md` 为模板新增 `docs/releases/<version>-validation.md`，记录：
 
-```powershell
-$version = (Get-Content scripts/logic-package.json -Raw | ConvertFrom-Json).version
-npm view "@deepctrls/craftjs@$version" version dist.tarball --registry=https://registry.npmjs.org/
-```
+- 发布目标、日期、源码提交 SHA、版本预检结果。
+- workflow 中测试、构建、lint 和 React 18/19 消费者验证结果。
+- registry tarball 地址及 SHA256。
+- 未执行的浏览器或业务端验收，以及已知限制。
 
-## 2. 安装依赖并验证源码
+检查 `scripts/logic-package.README.md` 的变更摘要完整，再将发布记录提交并推送到 `hnldlsjzt/craft.js:main`。
 
-使用仓库锁定的 Yarn 版本和 lockfile：
+## 失败恢复
+
+若 npm 发布 job 成功，但 GitHub 记录 job 创建 tag 或 Release 失败，在**原 workflow run** 选择 `Re-run jobs` → `Re-run failed jobs`。记录 job 会使用原 run 的版本和触发 SHA、再次核对 npm 中存在该版本，并只补齐与原提交一致的缺失记录；它不会重新发布 npm 包。不要为恢复创建同版本提交或重新 dispatch。
+
+若 tag 已存在但指向不同提交、Release 与 tag/提交不匹配、Release 存在但 tag 缺失，或无法确认原 run 的 npm 发布 job 成功，停止重跑并人工调查。不得强制移动 tag 或覆盖 Release。若版本预检发现 npm 中已有版本但当前 run 的 npm 发布 job 被跳过，也不能据此自动补建历史 tag 或 Release。
+
+## 验证 Trusted Publisher（不正式发布）
+
+若只需验证新建 Trusted Publisher 的 OIDC 身份，不要为测试正式发布版本。确认 `.github/workflows/release.yml` 已合入 `main` 且 npm 配置仍处于 Pending validation 后，在仓库 Actions 手动运行 `Publish @deepctrls/craftjs`：
+
+1. `release_mode` 选择 `stage`。
+2. `stage_version` 填一个未占用的稳定版本，例如 `0.2.17`。先确认该版本既未正式发布，也未出现在 npm 的 Staged packages 中；npm 对正式版本和 staged 版本共用版本唯一索引。工作流会用该版本号构建临时 tarball，不修改仓库里的版本元数据。
+3. 等待完整验证成功。OIDC 发布 job 会对已验证的同一个 tarball 执行 `npm stage publish`；stage 模式不会执行正式 `npm publish`，也不会创建 Git tag 或 GitHub Release。
+4. 在 npm Trusted Publisher 设置确认状态变为 Validated，并在 Staged packages 中确认测试包。不要批准该 stage；验证后由包维护者手动拒绝测试 stage。`npm stage reject` 需要维护者交互式 2FA。
+
+Stage 模式只接受未占用的版本；预检发现版本已经正式发布时会失败，若版本已在其它 staged package 中占用，npm stage publish 会拒绝重复版本。push 版本元数据仍走正常正式发布模式，workflow dispatch 的默认模式也是 `publish`，因此手动运行时必须明确选 `stage` 才不会正式发包。
+
+## 本地验证（可选）
+
+在发版前也可按 CI 命令本地复现验证。任一步失败都应先排查，不能继续发布：
 
 ```powershell
 node .yarn/releases/yarn-3.6.3.cjs install --immutable --mode=skip-build
-node scripts/check-logic-release.test.cjs
+node --test scripts/check-logic-release.test.cjs
 node .yarn/releases/yarn-3.6.3.cjs test --runInBand
 ```
-
-构建 layers 供仓库 lint 解析，再运行全仓 lint：
 
 ```powershell
 Push-Location packages/layers
@@ -61,78 +103,4 @@ Pop-Location
 npm run lint
 ```
 
-任一命令失败都先修复或记录原因，不继续发布。浏览器端验收、业务仓库替换依赖后的验收不由上述 Jest、build 或 lint 结果代替；按本次改动风险另行记录。
-
-## 3. 生成并检查将要发布的 tarball
-
-准备脚本会构建 utils 和 core 的声明及运行时代码，生成 `release/logic-craftjs`，把匹配版本的 utils 放入 `internal/utils`，重写 Core 的 CJS、ESM 和声明入口，并复制发布 README。该目录是生成物，不要手工修改。
-
-```powershell
-node scripts/prepare-logic-release.cjs
-$version = (Get-Content scripts/logic-package.json -Raw | ConvertFrom-Json).version
-npm pack ./release/logic-craftjs --pack-destination release
-$tarball = "release/deepctrls-craftjs-$version.tgz"
-if (-not (Test-Path $tarball)) { throw "Missing release tarball: $tarball" }
-```
-
-检查生成包的名字、版本、README、依赖和文件：
-
-```powershell
-$manifest = Get-Content release/logic-craftjs/package.json -Raw | ConvertFrom-Json
-if ($manifest.name -ne '@deepctrls/craftjs' -or $manifest.version -ne $version) { throw 'Unexpected package name or version' }
-if ($manifest.dependencies.'@craftjs/utils') { throw 'Utilities must be bundled inside this package' }
-tar -tf $tarball
-Get-FileHash $tarball -Algorithm SHA256
-```
-
-然后用独立消费者验证 tarball，而不是只验证 workspace 源码：
-
-```powershell
-node scripts/verify-logic-package.cjs $tarball 18.3.1
-node scripts/verify-logic-package.cjs $tarball 19.0.0
-```
-
-验证脚本会临时安装该 tarball 与指定 React 版本，检查 CJS、ESM、声明文件、编辑权限和历史行为。记录测试结果及 SHA256；验证失败时不要发布。
-
-## 4. 登录并发布已验证的 tarball
-
-确认使用官方 npm registry，并确认登录身份拥有 `@deepctrls` 发布权限：
-
-```powershell
-npm whoami --registry=https://registry.npmjs.org/
-```
-
-未登录时由包维护者在交互终端完成 `npm login --registry=https://registry.npmjs.org/`，不要把 token 写进命令、文档或仓库文件。登录后重新运行 `npm whoami`。
-
-发布刚才验证过的同一个 tarball：
-
-```powershell
-npm publish $tarball --access public --registry=https://registry.npmjs.org/
-```
-
-发布是不可覆盖的 registry 写入。确认版本预检为 404、包名/版本正确、独立消费者验证通过后再执行。手动本地发布不带 GitHub Actions OIDC provenance；若发布策略要求 provenance，改走 `.github/workflows/release.yml`，不要混用两种发布动作。
-
-## 5. 发布后确认并归档
-
-核对 registry 元数据和下载地址：
-
-```powershell
-npm view "@deepctrls/craftjs@$version" version dist.tarball --registry=https://registry.npmjs.org/
-```
-
-以 `docs/releases/0.2.14-validation.md` 为模板，新建 `docs/releases/<version>-validation.md`，记录：
-
-- 发布目标、日期、源码提交号、版本预检结果。
-- Jest、lint、声明/CJS/ESM 构建、两种 React 独立消费者结果。
-- npm 发布命令结果、registry 返回的 tarball 地址、已发布 tarball 的 SHA256。
-- 未执行的浏览器/业务端回归及其它已知限制。
-
-最后更新 `scripts/logic-package.README.md` 的变更说明，并提交发布记录。版本已经存在时不能再次发布同版本；修复应增加版本后重走流程。
-
-## 6. 业务仓库切换版本
-
-发布成功后，在业务仓库将 `@craftjs/core` alias 和 pnpm override 一起更新到已发布的精确版本，再运行 `pnpm install --lockfile-only` 或 `pnpm install` 更新 lockfile并检查解析结果。新版本已含所需改动后，删除对应 `patchedDependencies` 项和本地 patch 文件；不要同时保留旧版本覆盖或重复的 `@deepctrls/craftjs` 依赖。
-
-业务源码仍直接从 `@craftjs/utils` 导入 `ROOT_NODE`、`getRandomId` 时，保留业务自身的 `@craftjs/utils` 依赖。这里的路径订阅实现属于 Core 内部打包的 utils，不需要单独发布 `@craftjs/utils`。
-
-验证业务 lockfile 中 `@craftjs/core`、`@craftjs/layers` 等 peer 最终只解析到同一份 `@deepctrls/craftjs`，再执行业务侧针对性测试和手工页面验收。先在业务分支验证，再合并版本升级。
+CI 的发布验证是完整结果的最终依据；浏览器端和业务仓库替换依赖后的验收应按改动风险另行记录。

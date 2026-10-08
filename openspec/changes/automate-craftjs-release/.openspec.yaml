@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-29
+goal: Publish a manually prepared release commit from main after verification,
+  then ensure npm, Git tag, and GitHub Release are complete and recoverable.

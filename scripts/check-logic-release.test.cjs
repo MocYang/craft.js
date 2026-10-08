@@ -1,7 +1,10 @@
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
 
-const { getReleasePlan } = require('./check-logic-release.cjs');
+const {
+  getReleasePlan,
+  resolveMetadata,
+} = require('./check-logic-release.cjs');
 
 const metadata = { name: '@deepctrls/craftjs', version: '0.2.14' };
 
@@ -20,6 +23,21 @@ test('only a missing version is eligible for publication', async () => {
   assert.equal(
     (await getReleasePlan(metadata, async () => ({ status: 404 }))).publish,
     true
+  );
+});
+
+test('stage mode requires an explicit stable test version override', () => {
+  assert.deepEqual(resolveMetadata(metadata, 'stage', '0.2.17'), {
+    ...metadata,
+    version: '0.2.17',
+  });
+  assert.throws(
+    () => resolveMetadata(metadata, 'stage', ''),
+    /requires a test version/
+  );
+  assert.throws(
+    () => resolveMetadata(metadata, 'publish', '0.2.17'),
+    /only in stage mode/
   );
 });
 

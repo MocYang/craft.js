@@ -9,6 +9,9 @@ const { nodeResolve } = require('@rollup/plugin-node-resolve');
 const { rollup } = require('rollup');
 
 const metadata = require('./logic-package.json');
+if (process.env.RELEASE_MODE === 'stage') {
+  metadata.version = process.env.RELEASE_VERSION;
+}
 
 function runNode(args, cwd) {
   const result = spawnSync(process.execPath, args, { cwd, stdio: 'inherit' });
@@ -105,8 +108,8 @@ async function verifyRuntime(core, consumerRequire) {
     assert.equal(store.query.node('child').get().dom, lastDOM);
     assert.equal(
       notifications,
-      beforeNotifications + 1,
-      'DOM batches notify onNodesChange'
+      beforeNotifications,
+      'DOM batches must not notify document changes'
     );
     assert.equal(
       serializationCalls,
@@ -122,6 +125,11 @@ async function verifyRuntime(core, consumerRequire) {
       })
     );
     assert.equal(store.query.node('child').get().data.props.style.color, 'red');
+    assert.equal(
+      notifications,
+      beforeNotifications + 1,
+      'Node data changes must notify onNodesChange'
+    );
     const before = store.query.serialize();
     const pointer = store.history.pointer;
     await act(() =>

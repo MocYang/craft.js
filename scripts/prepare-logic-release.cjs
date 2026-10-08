@@ -9,6 +9,9 @@ const root = path.resolve(__dirname, '..');
 const releaseRoot = path.join(root, 'release');
 const stagingDir = path.join(releaseRoot, 'logic-craftjs');
 const metadata = require('./logic-package.json');
+if (process.env.RELEASE_MODE === 'stage') {
+  metadata.version = process.env.RELEASE_VERSION;
+}
 
 function runTool(tool, args, cwd, env = {}) {
   const result = spawnSync(process.execPath, [require.resolve(tool), ...args], {
